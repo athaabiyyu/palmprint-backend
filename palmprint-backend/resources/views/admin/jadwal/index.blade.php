@@ -264,7 +264,6 @@ async function simpan() {
     }
 }
 
-// ── Hapus ──
 async function hapus(id) {
     if (!confirm('Yakin hapus jadwal ini?')) return;
     await axios.delete(`/api/admin/jadwals/${id}`);

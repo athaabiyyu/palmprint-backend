@@ -7,10 +7,31 @@ use App\Http\Controllers\Api\Admin\DosenController;
 use App\Http\Controllers\Api\Admin\MataKuliahController;
 use App\Http\Controllers\Api\Admin\JadwalController;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\Dosen\AuthDosenController;
+use App\Http\Controllers\Api\Dosen\SesiAbsensiController;
+use App\Http\Controllers\Api\Mahasiswa\JadwalMahasiswaController;
+use App\Http\Controllers\Api\Mahasiswa\AbsensiController;
 
 // ==================== AUTH MAHASISWA ====================
-Route::post('/register', [AuthController::class, 'register']);
-Route::post('/login',    [AuthController::class, 'login']);
+Route::post('/register',      [AuthController::class, 'register']);
+Route::post('/login',         [AuthController::class, 'login']);
+Route::get ('/daftar-kelas',  [AuthController::class, 'daftarKelas']);
+// Protected — butuh token
+Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/pilih-kelas', [AuthController::class, 'pilihKelas']);
+    Route::get ('/profil',      [AuthController::class, 'profil']);
+});
+
+Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/pilih-kelas', [AuthController::class,          'pilihKelas']);
+    Route::get ('/profil',      [AuthController::class,          'profil']);
+
+    // Mahasiswa
+    Route::prefix('mahasiswa')->group(function () {
+        Route::get ('jadwal-hari-ini', [JadwalMahasiswaController::class, 'jadwalHariIni']);
+        Route::post('absensi',         [AbsensiController::class,         'absensi']);
+    });
+});
 
 // ==================== ADMIN ====================
 Route::prefix('admin')->group(function () {
@@ -48,4 +69,16 @@ Route::prefix('admin')->group(function () {
     Route::put   ('jadwals/{id}',               [JadwalController::class, 'update']);
     Route::delete('jadwals/{id}',               [JadwalController::class, 'destroy']);
     Route::get   ('jadwals/kelas/{kelasId}',    [JadwalController::class, 'byKelas']);
+});
+
+// ==================== DOSEN ====================
+Route::post('dosen/login', [AuthDosenController::class, 'login']);
+
+Route::middleware('auth:sanctum')->prefix('dosen')->group(function () {
+    Route::post('logout',              [AuthDosenController::class,  'logout']);
+    Route::get ('jadwal-hari-ini',     [SesiAbsensiController::class, 'jadwalHariIni']);
+    Route::post('sesi/buka',           [SesiAbsensiController::class, 'buka']);
+    Route::post('sesi/{id}/tutup',     [SesiAbsensiController::class, 'tutup']);
+    Route::get ('sesi/{id}/detail',    [SesiAbsensiController::class, 'detail']);
+    Route::get ('sesi/aktif',          [SesiAbsensiController::class, 'sesiAktif']);
 });

@@ -10,6 +10,7 @@ class Mahasiswa extends Model
 
     protected $table    = 'mahasiswas';
     protected $fillable = ['nim', 'nama', 'password'];
+    protected $hidden   = ['password'];
 
     public function palmprintTemplates()
     {
