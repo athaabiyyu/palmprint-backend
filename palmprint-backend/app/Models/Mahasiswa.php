@@ -1,5 +1,4 @@
 <?php
-
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
@@ -9,10 +8,21 @@ class Mahasiswa extends Model
 {
     use HasApiTokens;
 
-    protected $fillable = ['nim', 'nama'];
+    protected $table    = 'mahasiswas';
+    protected $fillable = ['nim', 'nama', 'password'];
 
     public function palmprintTemplates()
     {
         return $this->hasMany(PalmprintTemplate::class);
+    }
+
+    public function kelas()
+    {
+        return $this->belongsToMany(Kelas::class, 'mahasiswa_kelas');
+    }
+
+    public function absensis()
+    {
+        return $this->hasMany(Absensi::class);
     }
 }
