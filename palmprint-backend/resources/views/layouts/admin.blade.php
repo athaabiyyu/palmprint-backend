@@ -44,6 +44,9 @@
                 <a href="/admin/jadwal" class="nav-link {{ request()->is('admin/jadwal') ? 'active' : '' }}">
                     <i class="bi bi-table me-2"></i> Jadwal
                 </a>
+                <a href="/admin/rekap" class="nav-link {{ request()->is('admin/rekap') ? 'active' : '' }}">
+                    <i class="bi bi-clipboard-data me-2"></i> Rekap Absensi
+                </a>
             </nav>
         </div>
 

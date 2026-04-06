@@ -167,14 +167,17 @@
 
         // ── Data ──
         const dosen = JSON.parse(localStorage.getItem('dosen_data') ?? '{}');
-       let activeSesiId  = null;
-       let countdownTimer = null;
+        let activeSesiId = null;
+        let countdownTimer = null;
 
-       // Tambahkan ini
-       const hariMap = {
-       senin: 'Senin', selasa: 'Selasa', rabu: 'Rabu',
-       kamis: 'Kamis', jumat: 'Jumat'
-       };
+        // Tambahkan ini
+        const hariMap = {
+            senin: 'Senin',
+            selasa: 'Selasa',
+            rabu: 'Rabu',
+            kamis: 'Kamis',
+            jumat: 'Jumat'
+        };
 
         const modalBuka = new bootstrap.Modal(document.getElementById('modalBukaSesi'));
         const modalDetail = new bootstrap.Modal(document.getElementById('modalDetailSesi'));
@@ -236,18 +239,14 @@
                         <i class="bi bi-clock me-1"></i>${j.jam_mulai} - ${j.jam_selesai}
                         ${j.ruangan ? `<i class="bi bi-geo-alt ms-2 me-1"></i>${j.ruangan}` : ''}
                     </div>
-                    ${isToday
-                        ? sesiAktif
-                            ? `<button class="btn btn-success btn-sm w-100" onclick="lihatDetail(${sesiAktif.id})">
-                                        <i class="bi bi-eye me-1"></i> Lihat Absensi
-                                   </button>`
-                            : `<button class="btn btn-primary btn-sm w-100" onclick="showModalBuka(${j.id}, '${j.mata_kuliah.nama}', '${j.kelas.nama}')">
-                                        <i class="bi bi-unlock me-1"></i> Buka Absensi
-                                   </button>`
-                        : `<button class="btn btn-secondary btn-sm w-100" disabled>
-                                    <i class="bi bi-lock me-1"></i> Bukan Hari Ini
-                               </button>`
-                    }
+                    ${sesiAktif
+    ? `<button class="btn btn-success btn-sm w-100" onclick="lihatDetail(${sesiAktif.id})">
+                <i class="bi bi-eye me-1"></i> Lihat Absensi
+           </button>`
+    : `<button class="btn btn-primary btn-sm w-100" onclick="showModalBuka(${j.id}, '${j.mata_kuliah.nama}', '${j.kelas.nama}')">
+                <i class="bi bi-unlock me-1"></i> Buka Absensi
+           </button>`
+}
                 </div>
             </div>
         </div>

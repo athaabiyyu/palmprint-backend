@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\Dosen\AuthDosenController;
 use App\Http\Controllers\Api\Dosen\SesiAbsensiController;
 use App\Http\Controllers\Api\Mahasiswa\JadwalMahasiswaController;
 use App\Http\Controllers\Api\Mahasiswa\AbsensiController;
+use App\Http\Controllers\Api\Admin\RekapApiController;
 
 // ==================== AUTH MAHASISWA ====================
 Route::post('/register',      [AuthController::class, 'register']);
@@ -69,6 +70,10 @@ Route::prefix('admin')->group(function () {
     Route::put   ('jadwals/{id}',               [JadwalController::class, 'update']);
     Route::delete('jadwals/{id}',               [JadwalController::class, 'destroy']);
     Route::get   ('jadwals/kelas/{kelasId}',    [JadwalController::class, 'byKelas']);
+
+    // Rekap Absensi
+    Route::get('rekap/jadwal/{kelasId}', [RekapApiController::class, 'jadwalByKelas']);
+    Route::get('rekap',                  [RekapApiController::class, 'rekap']);
 });
 
 // ==================== DOSEN ====================
