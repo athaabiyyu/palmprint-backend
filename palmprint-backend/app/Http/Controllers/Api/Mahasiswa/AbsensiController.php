@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Http\Controllers\Api\Mahasiswa;
 
 use App\Http\Controllers\Controller;
@@ -48,15 +49,15 @@ class AbsensiController extends Controller
         $request->file('foto')->move(storage_path('app/temp'), $fileName);
 
         // Ekstraksi fitur
-        $result = PythonHelper::extractFeature($fullPath);
+        $result = PythonHelper::extractFeatures([$fullPath]);
         if (file_exists($fullPath)) unlink($fullPath);
 
         if (!$result) {
             return response()->json(['message' => 'Gagal memproses foto'], 422);
         }
 
-        $queryVector = $result['vector'];
-        $threshold   = $result['threshold'];
+        $queryVector = $result[0]['vector'];
+        $threshold   = $result[0]['threshold'];
 
         // Ambil template palmprint mahasiswa
         $templates = PalmprintTemplate::where('mahasiswa_id', $mahasiswa->id)->get();
@@ -75,13 +76,27 @@ class AbsensiController extends Controller
             }
         }
 
+        // Tambah log sementara untuk debug
+        \Illuminate\Support\Facades\Log::info('=== DEBUG ABSENSI ===');
+        \Illuminate\Support\Facades\Log::info('Mahasiswa ID : ' . $mahasiswa->id);
+        \Illuminate\Support\Facades\Log::info('Query dim    : ' . count($queryVector));
+        \Illuminate\Support\Facades\Log::info('Threshold    : ' . $threshold);
+        \Illuminate\Support\Facades\Log::info('Best score   : ' . $bestScore);
+        \Illuminate\Support\Facades\Log::info('Jumlah tmpl  : ' . $templates->count());
+
+        // Cek dimensi tiap template
+        foreach ($templates as $i => $template) {
+            $v = json_decode($template->feature_vector, true);
+            \Illuminate\Support\Facades\Log::info('Template ' . ($i + 1) . ' dim: ' . count($v));
+        }
+
         if ($bestScore >= $threshold) {
             // Catat absensi
             Absensi::create([
                 'sesi_absensi_id' => $sesi->id,
                 'mahasiswa_id'    => $mahasiswa->id,
                 'waktu_absen'     => Carbon::now(),
-                'similarity_score'=> $bestScore,
+                'similarity_score' => $bestScore,
                 'status'          => 'hadir',
             ]);
 

@@ -12,34 +12,34 @@ class PythonHelper
         */
 
        
-       public static function extractFeature(string $imagePath): ?array
+public static function extractFeatures(array $imagePaths): ?array
 {
     $pythonPath = 'C:\\Python313\\python.exe';
     $scriptPath = 'D:\\xampp\\htdocs\\palmprint-backend\\palmprint-ml\\palmprint_api.py';
 
-    $command = "{$pythonPath} \"{$scriptPath}\" --image \"{$imagePath}\" 2>&1";
-    $output  = shell_exec($command);
+    // Gabung semua path dengan spasi
+    $pathArgs = implode('" "', $imagePaths);
+    $command  = "{$pythonPath} \"{$scriptPath}\" --images \"{$pathArgs}\" 2>&1";
+    $output   = shell_exec($command);
 
-    // Tambahkan log untuk debug
-    Log::info('Python command: ' . $command);
-    Log::info('Python output: ' . $output);
+    Log::info('Python extractFeatures command: ' . $command);
+    Log::info('Python extractFeatures output: ' . $output);
 
-    if (!$output) {
-        return null;
-    }
+    if (!$output) return null;
 
+    // Ambil baris terakhir yang berisi JSON
     $lines  = array_filter(explode("\n", trim($output)));
     $last   = end($lines);
     $result = json_decode($last, true);
 
-    if (!$result || $result['status'] !== 'success') {
-        return null;
+    if (!$result || !is_array($result)) return null;
+
+    // Cek semua berhasil
+    foreach ($result as $item) {
+        if ($item['status'] !== 'success') return null;
     }
 
-    return [
-        'vector'    => $result['vector'],
-        'threshold' => $result['threshold'],
-    ];
+    return $result;
 }
 
        /**

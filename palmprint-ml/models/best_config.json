@@ -1,0 +1,18 @@
+{
+  "hog_orient": 6,
+  "hog_pixels": 16,
+  "hog_cells": 2,
+  "pca_variance": 0.99,
+  "pca_n_comp": 93,
+  "threshold": 0.39000000000000007,
+  "acc_strict": 0.8166666666666667,
+  "acc_valid": 0.9198998748435544,
+  "f1_valid": 0.913832767149413,
+  "precision": 0.9314142678347934,
+  "recall": 0.9198998748435544,
+  "rejection_rate": 0.11222222222222222,
+  "n_train": 2100,
+  "n_test": 900,
+  "n_subjects": 300,
+  "feature_dim": 264
+}

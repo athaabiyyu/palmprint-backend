@@ -14,64 +14,73 @@ class AuthController extends Controller
 {
     // ==================== REGISTER ====================
     public function register(Request $request)
-    {
-        $request->validate([
-            'nim'      => 'required|string|unique:mahasiswas,nim',
-            'nama'     => 'required|string',
-            'password' => 'required|string|min:6',
-            'foto_1'   => 'required|mimes:jpg,jpeg,png,bmp,tiff,tif|max:10240',
-            'foto_2'   => 'required|mimes:jpg,jpeg,png,bmp,tiff,tif|max:10240',
-            'foto_3'   => 'required|mimes:jpg,jpeg,png,bmp,tiff,tif|max:10240',
-        ]);
+{
+    $request->validate([
+        'nim'      => 'required|string|unique:mahasiswas,nim',
+        'nama'     => 'required|string',
+        'password' => 'required|string|min:6',
+        'foto_1'   => 'required|mimes:jpg,jpeg,png,bmp,tiff,tif|max:10240',
+        'foto_2'   => 'required|mimes:jpg,jpeg,png,bmp,tiff,tif|max:10240',
+        'foto_3'   => 'required|mimes:jpg,jpeg,png,bmp,tiff,tif|max:10240',
+    ]);
 
-        $vectors = [];
-
-        foreach (['foto_1', 'foto_2', 'foto_3'] as $index => $fotoKey) {
-            $fileName = uniqid() . '.' . $request->file($fotoKey)->getClientOriginalExtension();
-            $fullPath = storage_path('app/temp/' . $fileName);
-            $request->file($fotoKey)->move(storage_path('app/temp'), $fileName);
-
-            $result = PythonHelper::extractFeature($fullPath);
-
-            if (file_exists($fullPath)) unlink($fullPath);
-
-            if (!$result) {
-                return response()->json([
-                    'message' => "Gagal ekstraksi fitur pada foto ke-" . ($index + 1),
-                ], 422);
-            }
-
-            $vectors[] = [
-                'vector'       => $result['vector'],
-                'sample_index' => $index + 1,
-            ];
-        }
-
-        // Simpan mahasiswa
-        $mahasiswa = Mahasiswa::create([
-            'nim'      => $request->nim,
-            'nama'     => $request->nama,
-            'password' => Hash::make($request->password),
-        ]);
-
-        // Simpan 3 template vektor
-        foreach ($vectors as $item) {
-            PalmprintTemplate::create([
-                'mahasiswa_id'   => $mahasiswa->id,
-                'feature_vector' => json_encode($item['vector']),
-                'sample_index'   => $item['sample_index'],
-            ]);
-        }
-
-        $token = $mahasiswa->createToken('auth_token')->plainTextToken;
-
-        return response()->json([
-            'message'      => 'Registrasi berhasil',
-            'token'        => $token,
-            'sudah_pilih_kelas' => false,
-            'data'         => $mahasiswa,
-        ], 201);
+    // Simpan semua foto sementara dulu
+    $fotoPaths = [];
+    foreach (['foto_1', 'foto_2', 'foto_3'] as $fotoKey) {
+        $fileName    = uniqid() . '.' . $request->file($fotoKey)->getClientOriginalExtension();
+        $fullPath    = storage_path('app/temp/' . $fileName);
+        $request->file($fotoKey)->move(storage_path('app/temp'), $fileName);
+        $fotoPaths[] = $fullPath;
     }
+
+    // Panggil Python SEKALI untuk 3 foto sekaligus
+    $results = PythonHelper::extractFeatures($fotoPaths);
+
+    // Hapus semua foto sementara
+    foreach ($fotoPaths as $path) {
+        if (file_exists($path)) unlink($path);
+    }
+
+    // Validasi hasil
+    if (!$results || count($results) !== 3) {
+        return response()->json([
+            'message' => 'Gagal ekstraksi fitur palmprint',
+        ], 422);
+    }
+
+    foreach ($results as $i => $result) {
+        if ($result['status'] !== 'success') {
+            return response()->json([
+                'message' => 'Gagal ekstraksi fitur pada foto ke-' . ($i + 1),
+            ], 422);
+        }
+    }
+
+    // Simpan mahasiswa
+    $mahasiswa = Mahasiswa::create([
+        'nim'      => $request->nim,
+        'nama'     => $request->nama,
+        'password' => Hash::make($request->password),
+    ]);
+
+    // Simpan 3 template vektor
+    foreach ($results as $i => $result) {
+        PalmprintTemplate::create([
+            'mahasiswa_id'   => $mahasiswa->id,
+            'feature_vector' => json_encode($result['vector']),
+            'sample_index'   => $i + 1,
+        ]);
+    }
+
+    $token = $mahasiswa->createToken('auth_token')->plainTextToken;
+
+    return response()->json([
+        'message'           => 'Registrasi berhasil',
+        'token'             => $token,
+        'sudah_pilih_kelas' => false,
+        'data'              => $mahasiswa,
+    ], 201);
+}
 
     // ==================== LOGIN ====================
     public function login(Request $request)
