@@ -10,11 +10,13 @@ use App\Http\Controllers\Admin\JadwalWebController;
 use App\Http\Controllers\Web\Dosen\DosenAuthController;
 use App\Http\Controllers\Web\Dosen\DosenDashboardController;
 use App\Http\Controllers\Admin\RekapController;
+use App\Http\Controllers\Admin\JurusanWebController;
 
 Route::get('/', fn() => redirect('/admin/dashboard'));
 
 Route::prefix('admin')->group(function () {
     Route::get ('dashboard',  [DashboardController::class,   'index']);
+    Route::get('jurusan', [JurusanWebController::class, 'index']);
     Route::get ('semester',   [SemesterWebController::class, 'index']);
     Route::get ('kelas',      [KelasWebController::class,    'index']);
     Route::get ('dosen',      [DosenWebController::class,    'index']);

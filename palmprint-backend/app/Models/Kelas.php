@@ -1,15 +1,16 @@
 <?php
+
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
 class Kelas extends Model
 {
-    protected $fillable = ['nama', 'semester_id'];
+    protected $fillable = ['prodi_id', 'semester_id', 'kode', 'nama', 'sks'];
 
-    public function semester()
+    public function prodi()
     {
-        return $this->belongsTo(Semester::class);
+        return $this->belongsTo(ProgramStudi::class, 'prodi_id');
     }
 
     public function mahasiswas()

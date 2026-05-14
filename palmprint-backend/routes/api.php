@@ -12,6 +12,8 @@ use App\Http\Controllers\Api\Dosen\SesiAbsensiController;
 use App\Http\Controllers\Api\Mahasiswa\JadwalMahasiswaController;
 use App\Http\Controllers\Api\Mahasiswa\AbsensiController;
 use App\Http\Controllers\Api\Admin\RekapApiController;
+use App\Http\Controllers\Api\Admin\JurusanController;
+use App\Http\Controllers\Api\Admin\ProgramStudiController;
 
 // ==================== AUTH MAHASISWA ====================
 Route::post('/register',      [AuthController::class, 'register']);
@@ -36,6 +38,18 @@ Route::middleware('auth:sanctum')->group(function () {
 
 // ==================== ADMIN ====================
 Route::prefix('admin')->group(function () {
+
+    // Jurusan
+    Route::get('jurusans',      [JurusanController::class, 'index']);
+    Route::post('jurusans',      [JurusanController::class, 'store']);
+    Route::put('jurusans/{id}', [JurusanController::class, 'update']);
+    Route::delete('jurusans/{id}', [JurusanController::class, 'destroy']);
+
+    // Program Studi
+    Route::get('prodis',        [ProgramStudiController::class, 'index']);
+    Route::post('prodis',        [ProgramStudiController::class, 'store']);
+    Route::put('prodis/{id}',   [ProgramStudiController::class, 'update']);
+    Route::delete('prodis/{id}',   [ProgramStudiController::class, 'destroy']);
 
     // Semester
     Route::get('semesters',              [SemesterController::class, 'index']);
