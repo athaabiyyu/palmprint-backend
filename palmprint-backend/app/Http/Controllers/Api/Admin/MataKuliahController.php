@@ -7,41 +7,73 @@ use Illuminate\Http\Request;
 
 class MataKuliahController extends Controller
 {
-    public function index()
+    // GET /api/admin/matkuls?semester_id=
+    public function index(Request $request)
     {
-        return response()->json(MataKuliah::latest()->get());
+        $query = MataKuliah::with('semester')->latest();
+
+        if ($request->semester_id) {
+            $query->where('semester_id', $request->semester_id);
+        }
+
+        return response()->json($query->get());
     }
 
+    // POST /api/admin/matkuls
     public function store(Request $request)
     {
         $request->validate([
-            'kode' => 'required|string|unique:mata_kuliahs,kode',
-            'nama' => 'required|string',
-            'sks'  => 'required|integer|min:1|max:6',
+            'semester_id' => 'required|exists:semesters,id',
+            'kode'        => 'required|string|max:20|unique:mata_kuliahs,kode',
+            'nama'        => 'required|string|max:100',
+            'sks'         => 'required|integer|min:1|max:6',
         ]);
 
-        $matkul = MataKuliah::create($request->only(['kode', 'nama', 'sks']));
+        $matkul = MataKuliah::create($request->only([
+            'semester_id', 'kode', 'nama', 'sks'
+        ]));
 
         return response()->json([
-            'message' => 'Mata kuliah berhasil dibuat',
-            'data'    => $matkul,
+            'message' => 'Mata kuliah berhasil ditambahkan',
+            'data'    => $matkul->load('semester'),
         ], 201);
     }
 
+    // PUT /api/admin/matkuls/{id}
     public function update(Request $request, $id)
     {
         $matkul = MataKuliah::findOrFail($id);
-        $matkul->update($request->only(['kode', 'nama', 'sks']));
+
+        $request->validate([
+            'semester_id' => 'required|exists:semesters,id',
+            'kode'        => 'required|string|max:20|unique:mata_kuliahs,kode,' . $id,
+            'nama'        => 'required|string|max:100',
+            'sks'         => 'required|integer|min:1|max:6',
+        ]);
+
+        $matkul->update($request->only([
+            'semester_id', 'kode', 'nama', 'sks'
+        ]));
 
         return response()->json([
             'message' => 'Mata kuliah berhasil diupdate',
-            'data'    => $matkul,
+            'data'    => $matkul->load('semester'),
         ]);
     }
 
+    // DELETE /api/admin/matkuls/{id}
     public function destroy($id)
     {
-        MataKuliah::findOrFail($id)->delete();
+        $matkul = MataKuliah::findOrFail($id);
+
+        // Cek apakah matkul sudah dipakai di jadwal
+        if ($matkul->jadwals()->exists()) {
+            return response()->json([
+                'message' => 'Mata kuliah tidak bisa dihapus karena sudah dipakai di jadwal!'
+            ], 422);
+        }
+
+        $matkul->delete();
         return response()->json(['message' => 'Mata kuliah berhasil dihapus']);
     }
 }

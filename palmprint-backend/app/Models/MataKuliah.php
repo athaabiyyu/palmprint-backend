@@ -5,7 +5,12 @@ use Illuminate\Database\Eloquent\Model;
 
 class MataKuliah extends Model
 {
-    protected $fillable = ['kode', 'nama', 'sks'];
+    protected $fillable = ['semester_id', 'kode', 'nama', 'sks'];
+
+    public function semester()
+    {
+        return $this->belongsTo(Semester::class);
+    }
 
     public function jadwals()
     {

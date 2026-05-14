@@ -6,9 +6,20 @@ use Illuminate\Database\Eloquent\Model;
 class Jadwal extends Model
 {
     protected $fillable = [
-        'kelas_id', 'mata_kuliah_id', 'dosen_id',
-        'hari', 'jam_mulai', 'jam_selesai', 'ruangan'
+        'semester_id',     
+        'kelas_id',
+        'mata_kuliah_id',
+        'dosen_id',
+        'hari',
+        'jam_mulai',
+        'jam_selesai',
+        'ruangan'
     ];
+
+    public function semester()
+    {
+        return $this->belongsTo(Semester::class);
+    }
 
     public function kelas()
     {
