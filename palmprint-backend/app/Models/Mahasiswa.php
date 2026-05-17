@@ -9,7 +9,7 @@ class Mahasiswa extends Model
     use HasApiTokens;
 
     protected $table    = 'mahasiswas';
-    protected $fillable = ['nim', 'nama', 'password'];
+    protected $fillable = ['nim', 'nama', 'password', 'is_active'];
     protected $hidden   = ['password'];
 
     public function palmprintTemplates()

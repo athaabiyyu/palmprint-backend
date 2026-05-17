@@ -80,21 +80,18 @@
                 <nav class="nav flex-column gap-1">
 
                     {{-- Dashboard --}}
-                    <a href="/admin/dashboard"
-                        class="nav-link {{ request()->is('admin/dashboard') ? 'active' : '' }}">
+                    <a href="/admin/dashboard" class="nav-link {{ request()->is('admin/dashboard') ? 'active' : '' }}">
                         <i class="bi bi-speedometer2 me-2"></i> Dashboard
                     </a>
 
                     {{-- Jurusan & Prodi --}}
-                    <a href="/admin/jurusan"
-                        class="nav-link {{ request()->is('admin/jurusan') ? 'active' : '' }}">
+                    <a href="/admin/jurusan" class="nav-link {{ request()->is('admin/jurusan') ? 'active' : '' }}">
                         <i class="bi bi-diagram-3 me-2"></i> Jurusan & Prodi
                     </a>
 
                     {{-- Akademik (Semester + Kelas) --}}
                     <a class="nav-link {{ request()->is('admin/semester') || request()->is('admin/kelas') ? 'active' : '' }}"
-                        data-bs-toggle="collapse"
-                        href="#menuAkademik"
+                        data-bs-toggle="collapse" href="#menuAkademik"
                         aria-expanded="{{ request()->is('admin/semester') || request()->is('admin/kelas') ? 'true' : 'false' }}">
                         <i class="bi bi-mortarboard me-2"></i> Akademik
                     </a>
@@ -104,40 +101,38 @@
                             class="nav-link {{ request()->is('admin/semester') ? 'active' : '' }}">
                             <i class="bi bi-calendar3 me-2"></i> Semester
                         </a>
-                        <a href="/admin/kelas"
-                            class="nav-link {{ request()->is('admin/kelas') ? 'active' : '' }}">
+                        <a href="/admin/kelas" class="nav-link {{ request()->is('admin/kelas') ? 'active' : '' }}">
                             <i class="bi bi-people me-2"></i> Kelas
                         </a>
                     </div>
 
                     {{-- Perkuliahan (Mata Kuliah + Jadwal) --}}
                     <a class="nav-link {{ request()->is('admin/matkul') || request()->is('admin/jadwal') ? 'active' : '' }}"
-                        data-bs-toggle="collapse"
-                        href="#menuPerkuliahan"
+                        data-bs-toggle="collapse" href="#menuPerkuliahan"
                         aria-expanded="{{ request()->is('admin/matkul') || request()->is('admin/jadwal') ? 'true' : 'false' }}">
                         <i class="bi bi-journal-bookmark me-2"></i> Perkuliahan
                     </a>
                     <div class="collapse nav-submenu {{ request()->is('admin/matkul') || request()->is('admin/jadwal') ? 'show' : '' }}"
                         id="menuPerkuliahan">
-                        <a href="/admin/matkul"
-                            class="nav-link {{ request()->is('admin/matkul') ? 'active' : '' }}">
+                        <a href="/admin/matkul" class="nav-link {{ request()->is('admin/matkul') ? 'active' : '' }}">
                             <i class="bi bi-book me-2"></i> Mata Kuliah
                         </a>
-                        <a href="/admin/jadwal"
-                            class="nav-link {{ request()->is('admin/jadwal') ? 'active' : '' }}">
+                        <a href="/admin/jadwal" class="nav-link {{ request()->is('admin/jadwal') ? 'active' : '' }}">
                             <i class="bi bi-table me-2"></i> Jadwal
                         </a>
                     </div>
 
                     {{-- Dosen --}}
-                    <a href="/admin/dosen"
-                        class="nav-link {{ request()->is('admin/dosen') ? 'active' : '' }}">
+                    <a href="/admin/dosen" class="nav-link {{ request()->is('admin/dosen') ? 'active' : '' }}">
                         <i class="bi bi-person-badge me-2"></i> Dosen
                     </a>
 
+                    <a href="/admin/mahasiswa" class="nav-link {{ request()->is('admin/mahasiswa') ? 'active' : '' }}">
+                        <i class="bi bi-mortarboard me-2"></i> Mahasiswa
+                    </a>
+
                     {{-- Rekap Absensi --}}
-                    <a href="/admin/rekap"
-                        class="nav-link {{ request()->is('admin/rekap') ? 'active' : '' }}">
+                    <a href="/admin/rekap" class="nav-link {{ request()->is('admin/rekap') ? 'active' : '' }}">
                         <i class="bi bi-clipboard-data me-2"></i> Rekap Absensi
                     </a>
 

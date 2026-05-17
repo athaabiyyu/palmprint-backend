@@ -14,6 +14,12 @@ use App\Http\Controllers\Api\Mahasiswa\AbsensiController;
 use App\Http\Controllers\Api\Admin\RekapApiController;
 use App\Http\Controllers\Api\Admin\JurusanController;
 use App\Http\Controllers\Api\Admin\ProgramStudiController;
+use App\Http\Controllers\Api\Admin\MahasiswaController;
+
+// ==================== PUBLIK ====================
+Route::get('jurusans',              [App\Http\Controllers\Api\PublikController::class, 'jurusans']);
+Route::get('jurusans/{id}/prodis',  [App\Http\Controllers\Api\PublikController::class, 'prodisByJurusan']);
+Route::get('prodis/{id}/kelas',     [App\Http\Controllers\Api\PublikController::class, 'kelasByProdi']);
 
 // ==================== AUTH MAHASISWA ====================
 Route::post('/register',      [AuthController::class, 'register']);
@@ -38,6 +44,12 @@ Route::middleware('auth:sanctum')->group(function () {
 
 // ==================== ADMIN ====================
 Route::prefix('admin')->group(function () {
+
+    // Mahasiswa
+    Route::get('mahasiswas',                        [MahasiswaController::class, 'index']);
+    Route::put('mahasiswas/{id}/toggle-aktif',      [MahasiswaController::class, 'toggleAktif']);
+    Route::put('mahasiswas/{id}/pindah-kelas',      [MahasiswaController::class, 'pindahKelas']);
+    Route::put('mahasiswas/{id}/reset-password',    [MahasiswaController::class, 'resetPassword']);
 
     // Jurusan
     Route::get('jurusans',      [JurusanController::class, 'index']);
