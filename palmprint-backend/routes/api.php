@@ -83,8 +83,8 @@ Route::prefix('admin')->group(function () {
     Route::post('dosens',                      [DosenController::class, 'store']);
     Route::put('dosens/{id}',                 [DosenController::class, 'update']);
     Route::delete('dosens/{id}',                 [DosenController::class, 'destroy']);
-    Route::put('dosens/{id}/toggle-aktif',    [DosenController::class, 'toggleAktif']);  
-    Route::put('dosens/{id}/reset-password',  [DosenController::class, 'resetPassword']); 
+    Route::put('dosens/{id}/toggle-aktif',    [DosenController::class, 'toggleAktif']);
+    Route::put('dosens/{id}/reset-password',  [DosenController::class, 'resetPassword']);
 
     // Mata Kuliah
     Route::get('matkuls',        [MataKuliahController::class, 'index']);
@@ -100,8 +100,9 @@ Route::prefix('admin')->group(function () {
     Route::get('jadwals/kelas/{kelasId}',    [JadwalController::class, 'byKelas']);
 
     // Rekap Absensi
-    Route::get('rekap/jadwal/{kelasId}', [RekapApiController::class, 'jadwalByKelas']);
-    Route::get('rekap',                  [RekapApiController::class, 'rekap']);
+    Route::get('rekap/kelas',                [RekapApiController::class, 'kelasByProdi']); 
+    Route::get('rekap/jadwal/{kelasId}',     [RekapApiController::class, 'jadwalByKelas']);
+    Route::get('rekap',                      [RekapApiController::class, 'rekap']);
 });
 
 // ==================== DOSEN ====================
