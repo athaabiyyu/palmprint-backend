@@ -8,9 +8,8 @@ class Dosen extends Model
 {
     use HasApiTokens;
 
-    protected $fillable = ['nip', 'nama', 'password'];
-
-    protected $hidden = ['password'];
+    protected $fillable = ['nip', 'nama', 'password', 'is_active'];
+    protected $hidden   = ['password'];
 
     public function jadwals()
     {

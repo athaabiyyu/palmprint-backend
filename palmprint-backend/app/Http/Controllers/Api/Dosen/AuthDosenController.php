@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Http\Controllers\Api\Dosen;
 
 use App\Http\Controllers\Controller;
@@ -19,6 +20,12 @@ class AuthDosenController extends Controller
 
         if (!$dosen || !Hash::check($request->password, $dosen->password)) {
             return response()->json(['message' => 'NIP atau password salah'], 401);
+        }
+
+        if (!$dosen->is_active) {
+            return response()->json([
+                'message' => 'Akun Anda telah dinonaktifkan. Hubungi admin.'
+            ], 403);
         }
 
         $token = $dosen->createToken('dosen_token')->plainTextToken;

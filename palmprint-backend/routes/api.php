@@ -79,10 +79,12 @@ Route::prefix('admin')->group(function () {
     Route::get('kelas/{id}/mahasiswa',           [KelasController::class, 'mahasiswas']);
 
     // Dosen
-    Route::get('dosens',        [DosenController::class, 'index']);
-    Route::post('dosens',        [DosenController::class, 'store']);
-    Route::put('dosens/{id}',   [DosenController::class, 'update']);
-    Route::delete('dosens/{id}',   [DosenController::class, 'destroy']);
+    Route::get('dosens',                      [DosenController::class, 'index']);
+    Route::post('dosens',                      [DosenController::class, 'store']);
+    Route::put('dosens/{id}',                 [DosenController::class, 'update']);
+    Route::delete('dosens/{id}',                 [DosenController::class, 'destroy']);
+    Route::put('dosens/{id}/toggle-aktif',    [DosenController::class, 'toggleAktif']);  
+    Route::put('dosens/{id}/reset-password',  [DosenController::class, 'resetPassword']); 
 
     // Mata Kuliah
     Route::get('matkuls',        [MataKuliahController::class, 'index']);

@@ -8,7 +8,7 @@
     </button>
 </div>
 
-<!-- Tabel Dosen -->
+<!-- Tabel -->
 <div class="card border-0 shadow-sm">
     <div class="card-body">
         <table class="table table-hover align-middle">
@@ -16,12 +16,14 @@
                 <tr>
                     <th>No</th>
                     <th>NIP</th>
-                    <th>Nama Dosen</th>
+                    <th>Nama</th>
+                    <th>Status</th>
+                    <th>Password Default</th>
                     <th>Aksi</th>
                 </tr>
             </thead>
             <tbody id="tableDosen">
-                <tr><td colspan="4" class="text-center">Memuat data...</td></tr>
+                <tr><td colspan="6" class="text-center">Memuat data...</td></tr>
             </tbody>
         </table>
     </div>
@@ -39,16 +41,14 @@
                 <input type="hidden" id="dosenId">
                 <div class="mb-3">
                     <label class="form-label fw-semibold">NIP</label>
-                    <input type="text" id="nip" class="form-control" placeholder="contoh: 19800716201012001">
+                    <input type="text" id="nip" class="form-control"
+                        placeholder="contoh: 198501012010011001">
+                    <small class="text-muted">NIP akan digunakan sebagai password default</small>
                 </div>
                 <div class="mb-3">
                     <label class="form-label fw-semibold">Nama Dosen</label>
-                    <input type="text" id="nama" class="form-control" placeholder="contoh: Yuri Ariyanto">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label fw-semibold">Password</label>
-                    <input type="password" id="password" class="form-control" placeholder="Minimal 6 karakter">
-                    <div class="form-text" id="passwordHint">Kosongkan jika tidak ingin mengubah password</div>
+                    <input type="text" id="nama" class="form-control"
+                        placeholder="contoh: Dr. Budi Santoso">
                 </div>
             </div>
             <div class="modal-footer">
@@ -71,22 +71,52 @@ async function loadData() {
     const tbody = document.getElementById('tableDosen');
 
     if (data.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Belum ada data</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Belum ada data</td></tr>';
         return;
     }
 
     tbody.innerHTML = data.map((d, i) => `
-        <tr>
+        <tr class="${!d.is_active ? 'table-secondary' : ''}">
             <td>${i + 1}</td>
-            <td>${d.nip}</td>
-            <td>${d.nama}</td>
+            <td><span class="badge bg-dark">${d.nip}</span></td>
             <td>
-                <button class="btn btn-warning btn-sm me-1" onclick="edit(${d.id}, '${d.nip}', '${d.nama}')">
-                    <i class="bi bi-pencil"></i>
-                </button>
-                <button class="btn btn-danger btn-sm" onclick="hapus(${d.id})">
-                    <i class="bi bi-trash"></i>
-                </button>
+                ${d.nama}
+                ${!d.is_active ? '<span class="badge bg-danger ms-1">Nonaktif</span>' : ''}
+            </td>
+            <td>
+                ${d.is_active
+                    ? '<span class="badge bg-success">Aktif</span>'
+                    : '<span class="badge bg-danger">Nonaktif</span>'
+                }
+            </td>
+            <td>
+                <small class="text-muted">
+                    <i class="bi bi-info-circle me-1"></i>Sama dengan NIP
+                </small>
+            </td>
+            <td>
+                <div class="d-flex gap-1">
+                    <button class="btn btn-warning btn-sm"
+                        onclick="edit(${d.id}, '${d.nip}', '${d.nama}')"
+                        title="Edit">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <button class="btn btn-info btn-sm"
+                        onclick="resetPassword(${d.id}, '${d.nama}')"
+                        title="Reset Password ke NIP">
+                        <i class="bi bi-key"></i>
+                    </button>
+                    <button class="btn btn-${d.is_active ? 'secondary' : 'success'} btn-sm"
+                        onclick="toggleAktif(${d.id}, ${d.is_active})"
+                        title="${d.is_active ? 'Nonaktifkan' : 'Aktifkan'}">
+                        <i class="bi bi-${d.is_active ? 'slash-circle' : 'check-circle'}"></i>
+                    </button>
+                    <button class="btn btn-danger btn-sm"
+                        onclick="hapus(${d.id})"
+                        title="Hapus">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
             </td>
         </tr>
     `).join('');
@@ -94,44 +124,29 @@ async function loadData() {
 
 // ── Show Modal Tambah ──
 function showModal() {
-    document.getElementById('modalTitle').innerText  = 'Tambah Dosen';
-    document.getElementById('dosenId').value         = '';
-    document.getElementById('nip').value             = '';
-    document.getElementById('nama').value            = '';
-    document.getElementById('password').value        = '';
-    document.getElementById('passwordHint').style.display = 'none';
-    document.getElementById('password').placeholder = 'Minimal 6 karakter';
+    document.getElementById('modalTitle').innerText = 'Tambah Dosen';
+    document.getElementById('dosenId').value        = '';
+    document.getElementById('nip').value            = '';
+    document.getElementById('nama').value           = '';
     modal.show();
 }
 
 // ── Show Modal Edit ──
 function edit(id, nip, nama) {
-    document.getElementById('modalTitle').innerText  = 'Edit Dosen';
-    document.getElementById('dosenId').value         = id;
-    document.getElementById('nip').value             = nip;
-    document.getElementById('nama').value            = nama;
-    document.getElementById('password').value        = '';
-    document.getElementById('passwordHint').style.display = 'block';
-    document.getElementById('password').placeholder = 'Kosongkan jika tidak diubah';
+    document.getElementById('modalTitle').innerText = 'Edit Dosen';
+    document.getElementById('dosenId').value        = id;
+    document.getElementById('nip').value            = nip;
+    document.getElementById('nama').value           = nama;
     modal.show();
 }
 
 // ── Simpan ──
 async function simpan() {
-    const id       = document.getElementById('dosenId').value;
-    const password = document.getElementById('password').value;
-
+    const id   = document.getElementById('dosenId').value;
     const data = {
         nip  : document.getElementById('nip').value,
         nama : document.getElementById('nama').value,
     };
-
-    if (!id && !password) {
-        alert('Password wajib diisi untuk dosen baru!');
-        return;
-    }
-
-    if (password) data.password = password;
 
     if (!data.nip || !data.nama) {
         alert('NIP dan nama harus diisi!');
@@ -143,6 +158,7 @@ async function simpan() {
             await axios.put(`/api/admin/dosens/${id}`, data);
         } else {
             await axios.post('/api/admin/dosens', data);
+            alert('Dosen berhasil ditambahkan!\nPassword default: ' + data.nip);
         }
         modal.hide();
         loadData();
@@ -151,11 +167,39 @@ async function simpan() {
     }
 }
 
+// ── Toggle Aktif ──
+async function toggleAktif(id, isActive) {
+    const aksi = isActive ? 'nonaktifkan' : 'aktifkan';
+    if (!confirm(`Yakin ${aksi} akun dosen ini?`)) return;
+    try {
+        const res = await axios.put(`/api/admin/dosens/${id}/toggle-aktif`);
+        alert(res.data.message);
+        loadData();
+    } catch (e) {
+        alert(e.response?.data?.message ?? 'Terjadi kesalahan');
+    }
+}
+
+// ── Reset Password ──
+async function resetPassword(id, nama) {
+    if (!confirm(`Reset password ${nama} ke NIP?`)) return;
+    try {
+        await axios.put(`/api/admin/dosens/${id}/reset-password`);
+        alert('Password berhasil direset ke NIP!');
+    } catch (e) {
+        alert(e.response?.data?.message ?? 'Terjadi kesalahan');
+    }
+}
+
 // ── Hapus ──
 async function hapus(id) {
     if (!confirm('Yakin hapus dosen ini?')) return;
-    await axios.delete(`/api/admin/dosens/${id}`);
-    loadData();
+    try {
+        await axios.delete(`/api/admin/dosens/${id}`);
+        loadData();
+    } catch (e) {
+        alert(e.response?.data?.message ?? 'Gagal menghapus dosen');
+    }
 }
 
 loadData();
