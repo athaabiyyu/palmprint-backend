@@ -1,9 +1,10 @@
 """
-roi_mediapipe.py
-=================
-Drop-in replacement untuk fungsi ROI extraction di:
-  1. palmprint_api.py         -> ganti fungsi extract_roi()
-  2. palmprint_modeling.ipynb -> ganti fungsi detect_palm_opencv()
+roi_mediapipe.py  —  Fase 1A: ROI Alignment
+=============================================
+Perubahan dari versi sebelumnya:
+  - Tambah fungsi _align_roi()   : rotasi gambar agar sumbu tangan selalu vertikal
+  - Modif _get_palm_centroid()   : alignment dilakukan SEBELUM deteksi landmark & crop
+  - extract_roi() dan detect_palm_opencv() TIDAK BERUBAH (otomatis ikut terupdate)
 
 Kompatibel dengan MediaPipe >= 0.10 (API baru: HandLandmarker)
 """
@@ -52,72 +53,227 @@ _landmarker = HandLandmarker.create_from_options(_options)
 # 0=wrist, 1=thumb_cmc, 5=index_mcp, 9=middle_mcp, 13=ring_mcp, 17=pinky_mcp
 PALM_LANDMARK_IDS = [0, 1, 5, 9, 13, 17]
 
+# Index ke-3 dalam PALM_LANDMARK_IDS = landmark 9 (middle finger MCP)
+# Dipakai sebagai ujung sumbu untuk menghitung sudut kemiringan tangan
+_MIDDLE_MCP_IDX = 3
+
 ROI_SIZE = 200
 
 
 # ═══════════════════════════════════════════════════════════════════
-# FUNGSI HELPER INTERNAL
+# [BARU - FASE 1A] FUNGSI ALIGNMENT
 # ═══════════════════════════════════════════════════════════════════
+
+def _align_roi(img_bgr):
+    """
+    Rotasi gambar agar sumbu tangan selalu vertikal (tegak lurus ke atas).
+
+    Cara kerja:
+      1. Jalankan MediaPipe sekali untuk deteksi awal landmark
+      2. Hitung sudut antara wrist (lm 0) dan middle MCP (lm 9)
+         menggunakan arctan2(dx, dy) — sudut dari sumbu vertikal
+      3. Rotasi seluruh gambar sebesar -theta agar sumbu tangan = vertikal
+      4. Kembalikan gambar yang sudah dirotasi
+
+    Fallback: jika MediaPipe tidak mendeteksi tangan, kembalikan gambar asli
+    (proses tetap berjalan, hanya tidak ada alignment)
+
+    Args:
+        img_bgr: gambar BGR dari cv2.imread()
+
+    Returns:
+        img_aligned (np.ndarray): gambar BGR setelah dirotasi
+        angle (float): sudut rotasi dalam derajat (0.0 jika fallback)
+    """
+    h, w = img_bgr.shape[:2]
+
+    # Deteksi awal untuk mendapat landmark
+    img_rgb  = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
+    result   = _landmarker.detect(mp_image)
+
+    # Fallback: tidak ada tangan terdeteksi
+    if not result.hand_landmarks:
+        return img_bgr, 0.0
+
+    lm = result.hand_landmarks[0]
+
+    # Koordinat piksel wrist (lm 0) dan middle MCP (lm 9)
+    wrist_x  = int(lm[0].x * w)
+    wrist_y  = int(lm[0].y * h)
+    mid_x    = int(lm[9].x * w)   # middle finger MCP
+    mid_y    = int(lm[9].y * h)
+
+    # Hitung sudut kemiringan terhadap sumbu vertikal
+    # dx, dy = selisih koordinat dari wrist ke middle MCP
+    dx = mid_x - wrist_x
+    dy = mid_y - wrist_y  # dy negatif jika middle MCP di atas wrist (normal)
+
+    # arctan2(dx, -dy): sudut dari vertikal ke atas
+    # Negatif dy karena sumbu Y gambar terbalik (atas = 0)
+    angle = np.degrees(np.arctan2(dx, -dy))
+
+    # Clamp sudut: hanya koreksi ±45 derajat
+    # Lebih dari itu kemungkinan deteksi salah (tangan terbalik dll)
+    angle = np.clip(angle, -45, 45)
+
+    # Rotasi gambar di sekitar titik tengah
+    center = (w // 2, h // 2)
+    M      = cv2.getRotationMatrix2D(center, angle, 1.0)
+
+    # BORDER_REPLICATE: isi tepi dengan piksel terdekat (menghindari border hitam)
+    img_aligned = cv2.warpAffine(
+        img_bgr, M, (w, h),
+        flags       = cv2.INTER_LINEAR,
+        borderMode  = cv2.BORDER_REPLICATE
+    )
+
+    return img_aligned, angle
+
+
+# ═══════════════════════════════════════════════════════════════════
+# FUNGSI HELPER INTERNAL (dimodifikasi untuk alignment)
+# ═══════════════════════════════════════════════════════════════════
+
+def _compute_dynamic_roi_size(lm, w, h):
+    """
+    Hitung ukuran ROI secara dinamis berdasarkan jarak antar landmark.
+
+    Masalah: ROI fixed 200px tidak cocok untuk semua jarak kamera.
+    - Tangan dekat (dataset TJI) → telapak besar di piksel → 200px pas
+    - Tangan jauh (kamera HP)   → telapak kecil di piksel → 200px terlalu besar,
+      banyak background masuk, detail garis hilang setelah resize ke 64x64
+
+    Solusi: ukuran ROI = 1.4× jarak wrist ke middle MCP
+    - Faktor 1.4 dipilih agar ROI mencakup area telapak penuh (tidak sampai ujung jari)
+    - Di-clamp antara ROI_SIZE_MIN dan ROI_SIZE_MAX untuk safety
+
+    Args:
+        lm : hand_landmarks dari MediaPipe (list 21 landmark)
+        w, h: dimensi gambar dalam piksel
+
+    Returns:
+        roi_size (int): ukuran sisi ROI dalam piksel
+    """
+    ROI_SIZE_MIN = 120   # minimum: tangan sangat jauh
+    ROI_SIZE_MAX = 400   # maximum: tangan sangat dekat
+
+    # Jarak wrist (lm 0) ke middle MCP (lm 9) dalam piksel
+    wrist_x  = lm[0].x * w
+    wrist_y  = lm[0].y * h
+    mid_x    = lm[9].x * w
+    mid_y    = lm[9].y * h
+
+    dist_wrist_to_mid = np.sqrt((mid_x - wrist_x)**2 + (mid_y - wrist_y)**2)
+
+    # ROI = 1.4× jarak wrist-middle (empiris: mencakup telapak tanpa jari)
+    roi_size = int(dist_wrist_to_mid * 1.4)
+    roi_size = int(np.clip(roi_size, ROI_SIZE_MIN, ROI_SIZE_MAX))
+
+    return roi_size
+
 
 def _get_palm_centroid(img_bgr):
     """
-    Jalankan MediaPipe HandLandmarker, kembalikan (cx, cy, landmarks, hull).
-    Jika gagal, kembalikan (cx_default, cy_default, None, None).
+    [DIMODIFIKASI - FASE 1A + Dynamic ROI]
+    Jalankan alignment terlebih dahulu, lalu deteksi landmark pada gambar
+    yang sudah di-align. ROI size dihitung dinamis berdasarkan ukuran tangan.
 
-    Formula centroid:
-      - Pisahkan wrist (landmark 0) dan 5 MCP joints (landmark 1,5,9,13,17)
-      - Centroid = 30% wrist + 70% rata-rata MCP
-      - Lebih robust untuk tangan miring karena tidak terlalu ditarik ke wrist
+    Pipeline baru:
+      img_bgr → _align_roi() → img_aligned → MediaPipe detect
+             → dynamic ROI size → centroid → return
+
+    Perubahan:
+      - Alignment sebelum deteksi (Fase 1A)
+      - ROI size dinamis berdasarkan jarak wrist→middle MCP
+      - Return tambahan: img_aligned, angle, dynamic_roi_size
     """
-    h, w      = img_bgr.shape[:2]
-    cx, cy    = w // 2, h // 2
-    landmarks = None
-    hull      = None
+    h, w = img_bgr.shape[:2]
+    cx, cy       = w // 2, h // 2
+    landmarks    = None
+    hull         = None
+    dynamic_size = ROI_SIZE  # fallback ke default
 
-    img_rgb  = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    # ── FASE 1A: Alignment sebelum deteksi ──
+    img_aligned, angle = _align_roi(img_bgr)
+
+    # Deteksi landmark pada gambar yang sudah di-align
+    img_rgb  = cv2.cvtColor(img_aligned, cv2.COLOR_BGR2RGB)
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
     result   = _landmarker.detect(mp_image)
 
     if result.hand_landmarks:
         lm = result.hand_landmarks[0]
 
-        # Koordinat piksel semua PALM_LANDMARK_IDS
+        # Hitung ROI size dinamis dari ukuran tangan di frame
+        dynamic_size = _compute_dynamic_roi_size(lm, w, h)
+
         xs = [int(lm[i].x * w) for i in PALM_LANDMARK_IDS]
         ys = [int(lm[i].y * h) for i in PALM_LANDMARK_IDS]
 
-        # Pisahkan wrist (index 0) dan MCP joints (index 1-5)
         wrist_x = xs[0]
         wrist_y = ys[0]
-        mcp_cx  = int(np.mean(xs[1:]))   # rata-rata 5 MCP joints
+        mcp_cx  = int(np.mean(xs[1:]))
         mcp_cy  = int(np.mean(ys[1:]))
 
-        # 30% wrist + 70% MCP → fokus ke tengah telapak
-        cx = int(wrist_x * 0.3 + mcp_cx * 0.7)
-        cy = int(wrist_y * 0.3 + mcp_cy * 0.7)
+        # Panjang tangan = jarak wrist ke rata-rata MCP (dalam piksel)
+        hand_len = np.sqrt((mcp_cx - wrist_x)**2 + (mcp_cy - wrist_y)**2)
 
-        # Clamp agar tidak keluar batas gambar
-        cx = max(ROI_SIZE // 2, min(w - ROI_SIZE // 2, cx))
-        cy = max(ROI_SIZE // 2, min(h - ROI_SIZE // 2, cy))
+        # Arah unit vector dari MCP ke wrist (arah "ke bawah" sepanjang tangan)
+        # Dipakai untuk menggeser centroid ke arah wrist secara proporsional
+        if hand_len > 0:
+            dir_x = (mcp_cx - wrist_x) / hand_len
+            dir_y = (mcp_cy - wrist_y) / hand_len
+        else:
+            dir_x, dir_y = 0, -1
+
+        # Mulai dari midpoint MCP-wrist, geser 15% panjang tangan ke arah wrist
+        # Hasil: centroid mendarat di zona garis M (area tengah telapak bawah)
+        mid_x = int((wrist_x + mcp_cx) / 2)
+        mid_y = int((wrist_y + mcp_cy) / 2)
+        offset = hand_len * 0.20  # geser 20% ke arah MCP
+
+        cx = int(mid_x + dir_x * offset)
+        cy = int(mid_y + dir_y * offset)
+        
+        # Clamp centroid agar crop tidak keluar batas gambar
+        half = dynamic_size // 2
+        cx = max(half, min(w - half, cx))
+        cy = max(half, min(h - half, cy))
 
         landmarks = [(xs[i], ys[i]) for i in range(len(xs))]
-
         pts  = np.array([[xs[i], ys[i]] for i in range(len(xs))], dtype=np.int32)
         hull = cv2.convexHull(pts)
 
-    return cx, cy, landmarks, hull
+    return cx, cy, landmarks, hull, img_aligned, angle, dynamic_size
 
 
-def _crop_roi(gray, cx, cy):
-    """Center crop ROI_SIZE x ROI_SIZE dari centroid, dengan padding jika perlu."""
-    h, w = gray.shape[:2]
-    size = ROI_SIZE
+def _crop_roi(gray, cx, cy, size=None):
+    """
+    Center crop dari centroid dengan ukuran dinamis.
+    Hasil selalu di-resize ke ROI_SIZE x ROI_SIZE agar konsisten
+    untuk ekstraksi fitur HOG-SGF downstream.
 
-    x1 = max(cx - size // 2, 0)
-    y1 = max(cy - size // 2, 0)
-    x2 = min(cx + size // 2, w)
-    y2 = min(cy + size // 2, h)
+    Args:
+        gray : grayscale image
+        cx, cy: koordinat centroid
+        size  : ukuran crop (piksel). None = pakai ROI_SIZE default.
+
+    Returns:
+        roi      : grayscale ROI ukuran ROI_SIZE x ROI_SIZE (selalu konsisten)
+        roi_rect : (x1, y1, x2, y2) area crop di gambar asli
+    """
+    h, w    = gray.shape[:2]
+    size    = size or ROI_SIZE
+    half    = size // 2
+
+    x1 = max(cx - half, 0)
+    y1 = max(cy - half, 0)
+    x2 = min(cx + half, w)
+    y2 = min(cy + half, h)
     roi = gray[y1:y2, x1:x2]
 
+    # Padding jika crop terlalu kecil (terjadi di tepi gambar)
     if roi.shape[0] < size or roi.shape[1] < size:
         pad = np.zeros((size, size), dtype=np.uint8)
         yo  = (size - roi.shape[0]) // 2
@@ -125,80 +281,79 @@ def _crop_roi(gray, cx, cy):
         pad[yo:yo + roi.shape[0], xo:xo + roi.shape[1]] = roi
         roi = pad
 
+    # Resize ke ROI_SIZE agar dimensi selalu konsisten untuk HOG-SGF
+    if size != ROI_SIZE:
+        roi = cv2.resize(roi, (ROI_SIZE, ROI_SIZE), interpolation=cv2.INTER_LINEAR)
+
     return roi, (x1, y1, x2, y2)
 
 
 # ═══════════════════════════════════════════════════════════════════
-# [A] UNTUK palmprint_api.py
-#     Gantikan fungsi extract_roi() yang lama
+# [A] UNTUK palmprint_api.py  —  TIDAK BERUBAH
+#     Tapi sekarang internaly pakai alignment
 # ═══════════════════════════════════════════════════════════════════
 
 def extract_roi(img_bgr):
     """
     Deteksi ROI telapak tangan dengan MediaPipe HandLandmarker (v0.10+).
 
-    Pipeline:
-      1. MediaPipe -> 21 landmark tangan
-      2. Ambil 6 landmark area palm (wrist + 5 MCP joints)
-      3. Centroid = 30% wrist + 70% rata-rata MCP (robust untuk tangan miring)
-      4. Center crop ROI_SIZE x ROI_SIZE
-      5. Fallback ke center crop jika MediaPipe gagal
-
-    Args:
-        img_bgr: gambar BGR dari cv2.imread()
+    Pipeline (Fase 1A + Dynamic ROI):
+      1. Alignment: rotasi gambar agar tangan selalu vertikal
+      2. MediaPipe → 21 landmark tangan
+      3. Dynamic ROI size: proporsional terhadap jarak wrist→middle MCP
+      4. Centroid = 30% wrist + 70% rata-rata MCP
+      5. Crop dynamic_size × dynamic_size → resize ke ROI_SIZE × ROI_SIZE
+      6. Fallback ke center crop jika MediaPipe gagal
 
     Returns:
         roi (np.ndarray): grayscale ROI ukuran ROI_SIZE x ROI_SIZE
     """
-    gray          = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    cx, cy, _, __ = _get_palm_centroid(img_bgr)
-    roi, _        = _crop_roi(gray, cx, cy)
+    cx, cy, _, __, img_aligned, _angle, dynamic_size = _get_palm_centroid(img_bgr)
+    gray   = cv2.cvtColor(img_aligned, cv2.COLOR_BGR2GRAY)
+    roi, _ = _crop_roi(gray, cx, cy, size=dynamic_size)
     return roi
 
-
-# ═══════════════════════════════════════════════════════════════════
-# [B] UNTUK palmprint_modeling.ipynb
-#     Gantikan fungsi detect_palm_opencv() yang lama
-#     Kompatibel penuh — debug_info punya key yang sama persis
-# ═══════════════════════════════════════════════════════════════════
 
 def detect_palm_opencv(img_bgr, debug=False):
     """
     Deteksi ROI telapak tangan dengan MediaPipe HandLandmarker (v0.10+).
     Drop-in replacement untuk detect_palm_opencv() di notebook.
 
-    Mengembalikan (roi_gray, debug_info) persis seperti versi lama,
-    sehingga semua kode visualisasi di notebook tidak perlu diubah.
-
-    Args:
-        img_bgr : gambar BGR dari cv2.imread()
-        debug   : diabaikan (tetap ada untuk kompatibilitas signature)
+    Fase 1A + Dynamic ROI update:
+      - ROI size dinamis berdasarkan ukuran tangan di frame
+      - debug_info tambah key: 'angle', 'img_aligned', 'dynamic_roi_size'
+      - Semua key lama tetap ada (backward compatible)
 
     Returns:
         roi_gray (np.ndarray) : grayscale ROI ukuran ROI_SIZE x ROI_SIZE
-        dbg      (dict)       : debug info kompatibel dengan notebook lama
+        dbg      (dict)       : debug info lengkap
     """
     h, w = img_bgr.shape[:2]
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
-    cx, cy, landmarks, hull = _get_palm_centroid(img_bgr)
-    roi, roi_rect           = _crop_roi(gray, cx, cy)
+    cx, cy, landmarks, hull, img_aligned, angle, dynamic_size = _get_palm_centroid(img_bgr)
 
-    # Buat mask visualisasi dari convex hull landmark
+    gray          = cv2.cvtColor(img_aligned, cv2.COLOR_BGR2GRAY)
+    roi, roi_rect = _crop_roi(gray, cx, cy, size=dynamic_size)
+
     mask_vis = np.zeros((h, w), dtype=np.uint8)
     if hull is not None:
         cv2.fillConvexPoly(mask_vis, hull, 255)
 
     dbg = {
-        'mask_raw'  : mask_vis.copy(),
-        'mask_clean': mask_vis.copy(),
-        'fallback'  : landmarks is None,
-        'contour'   : hull,
-        'area'      : float(cv2.contourArea(hull)) if hull is not None else 0.0,
-        'cx'        : cx,
-        'cy'        : cy,
-        'roi_rect'  : roi_rect,
-        'landmarks' : landmarks,
+        # ── Key lama (backward compatible) ──
+        'mask_raw'        : mask_vis.copy(),
+        'mask_clean'      : mask_vis.copy(),
+        'fallback'        : landmarks is None,
+        'contour'         : hull,
+        'area'            : float(cv2.contourArea(hull)) if hull is not None else 0.0,
+        'cx'              : cx,
+        'cy'              : cy,
+        'roi_rect'        : roi_rect,
+        'landmarks'       : landmarks,
+        # ── Key baru (Fase 1A + Dynamic ROI) ──
+        'angle'           : angle,
+        'img_aligned'     : img_aligned,
+        'dynamic_roi_size': dynamic_size,
     }
 
     return roi, dbg
@@ -225,8 +380,11 @@ if __name__ == '__main__':
 
     roi2, dbg = detect_palm_opencv(img, debug=True)
     cv2.imwrite('test_roi_notebook.jpg', roi2)
+    cv2.imwrite('test_roi_aligned.jpg', dbg['img_aligned'])
     print(f'detect_palm_opencv -> shape={roi2.shape}  saved: test_roi_notebook.jpg')
-    print(f'  centroid  : ({dbg["cx"]}, {dbg["cy"]})')
-    print(f'  fallback  : {dbg["fallback"]}')
-    print(f'  area      : {dbg["area"]:.0f} px2')
-    print(f'  landmarks : {dbg["landmarks"]}')
+    print(f'  centroid    : ({dbg["cx"]}, {dbg["cy"]})')
+    print(f'  angle       : {dbg["angle"]:.2f} derajat')
+    print(f'  fallback    : {dbg["fallback"]}')
+    print(f'  area        : {dbg["area"]:.0f} px2')
+    print(f'  landmarks   : {dbg["landmarks"]}')
+    print(f'  img_aligned : saved: test_roi_aligned.jpg')
