@@ -1,0 +1,13 @@
+palmprint-ml/
+results/
+
+node_modules/
+vendor/
+storage/
+
+*.pt
+*.pth
+*.h5
+*.pkl
+*.zip
+*.rar
