@@ -12,7 +12,10 @@ class Kelas extends Model
     {
         return $this->belongsTo(ProgramStudi::class, 'prodi_id');
     }
-
+    public function semester()
+    {
+        return $this->belongsTo(Semester::class); // ← ini yang kurang
+    }
     public function mahasiswas()
     {
         return $this->belongsToMany(Mahasiswa::class, 'mahasiswa_kelas');
