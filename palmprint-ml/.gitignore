@@ -1,0 +1,8 @@
+dataset/
+results/
+models/
+*.pt
+*.pth
+*.pkl
+*.tiff
+*.task
