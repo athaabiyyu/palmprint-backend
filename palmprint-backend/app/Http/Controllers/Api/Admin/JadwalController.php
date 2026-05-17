@@ -11,7 +11,12 @@ class JadwalController extends Controller
     // ── GET /api/admin/jadwals?semester_id=&kelas_id= ──
     public function index(Request $request)
     {
-        $query = Jadwal::with(['semester', 'kelas', 'mataKuliah', 'dosen'])->latest();
+        $query = Jadwal::with([
+            'semester',
+            'kelas.prodi.jurusan',
+            'mataKuliah.prodi',
+            'dosen'
+        ])->latest();
 
         if ($request->semester_id) {
             $query->where('semester_id', $request->semester_id);
@@ -21,9 +26,12 @@ class JadwalController extends Controller
             $query->where('kelas_id', $request->kelas_id);
         }
 
+        if ($request->prodi_id) {
+            $query->whereHas('kelas', fn($q) => $q->where('prodi_id', $request->prodi_id));
+        }
+
         return response()->json($query->get());
     }
-
     // ── GET /api/admin/jadwals/kelas/{kelasId} ──
     public function byKelas($kelasId)
     {

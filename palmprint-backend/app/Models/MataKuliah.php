@@ -5,7 +5,12 @@ use Illuminate\Database\Eloquent\Model;
 
 class MataKuliah extends Model
 {
-    protected $fillable = ['semester_id', 'kode', 'nama', 'sks'];
+    protected $fillable = ['prodi_id', 'semester_id', 'kode', 'nama', 'sks'];
+
+    public function prodi()
+    {
+        return $this->belongsTo(ProgramStudi::class, 'prodi_id');
+    }
 
     public function semester()
     {
