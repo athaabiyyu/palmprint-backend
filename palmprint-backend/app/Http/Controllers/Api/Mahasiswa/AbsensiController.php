@@ -8,6 +8,7 @@ use App\Models\Absensi;
 use App\Models\PalmprintTemplate;
 use App\Helpers\PythonHelper;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
 
 class AbsensiController extends Controller
@@ -43,73 +44,89 @@ class AbsensiController extends Controller
             return response()->json(['message' => 'Anda sudah melakukan absensi'], 422);
         }
 
-        // Simpan foto sementara
+        // ── CEK TEMPLATE VALID DULU (sebelum proses foto) ──
+        $modelVersion = config('palmprint.model_version');
+        $templates    = PalmprintTemplate::where('mahasiswa_id', $mahasiswa->id)
+            ->where('model_version', $modelVersion)
+            ->get();
+
+        if ($templates->isEmpty()) {
+            return response()->json([
+                'message'             => config('palmprint.outdated_template_message'),
+                'perlu_re_registrasi' => true,
+            ], 422);
+        }
+
+        // ── SIMPAN FOTO SEMENTARA ──
         $fileName = uniqid() . '.' . $request->file('foto')->getClientOriginalExtension();
         $fullPath = storage_path('app/temp/' . $fileName);
         $request->file('foto')->move(storage_path('app/temp'), $fileName);
 
-        // Ekstraksi fitur
+        // ── EKSTRAKSI FITUR ──
         $result = PythonHelper::extractFeatures([$fullPath]);
         if (file_exists($fullPath)) unlink($fullPath);
 
-        if (!$result) {
+        if (!$result || $result[0]['status'] !== 'success') {
             return response()->json(['message' => 'Gagal memproses foto'], 422);
         }
 
         $queryVector = $result[0]['vector'];
         $threshold   = $result[0]['threshold'];
+        $queryDim    = count($queryVector);
 
-        // Ambil template palmprint mahasiswa
-        $templates = PalmprintTemplate::where('mahasiswa_id', $mahasiswa->id)->get();
+        // ── HITUNG COSINE SIMILARITY (MAX dari semua template) ──
+        $bestScore    = 0;
+        $bestTemplate = null;
 
-        if ($templates->isEmpty()) {
-            return response()->json(['message' => 'Template palmprint tidak ditemukan'], 422);
-        }
-
-        // Hitung cosine similarity
-        $bestScore = 0;
         foreach ($templates as $template) {
             $storedVector = json_decode($template->feature_vector, true);
-            $score        = PythonHelper::cosineSimilarity($queryVector, $storedVector);
+            $storedDim    = count($storedVector);
+
+            // Validasi dimensi — harus sama
+            if ($queryDim !== $storedDim) {
+                Log::warning("Dimensi tidak cocok: query={$queryDim}, template={$storedDim}, template_id={$template->id}");
+                continue;
+            }
+
+            $score = PythonHelper::cosineSimilarity($queryVector, $storedVector);
             if ($score > $bestScore) {
-                $bestScore = $score;
+                $bestScore    = $score;
+                $bestTemplate = $template;
             }
         }
 
-        // Tambah log sementara untuk debug
-        \Illuminate\Support\Facades\Log::info('=== DEBUG ABSENSI ===');
-        \Illuminate\Support\Facades\Log::info('Mahasiswa ID : ' . $mahasiswa->id);
-        \Illuminate\Support\Facades\Log::info('Query dim    : ' . count($queryVector));
-        \Illuminate\Support\Facades\Log::info('Threshold    : ' . $threshold);
-        \Illuminate\Support\Facades\Log::info('Best score   : ' . $bestScore);
-        \Illuminate\Support\Facades\Log::info('Jumlah tmpl  : ' . $templates->count());
+        // ── DEBUG LOG ──
+        Log::info('=== DEBUG ABSENSI ===');
+        Log::info('Mahasiswa ID   : ' . $mahasiswa->id);
+        Log::info('Model version  : ' . $modelVersion);
+        Log::info('Query dim      : ' . $queryDim);
+        Log::info('Threshold      : ' . $threshold);
+        Log::info('Best score     : ' . $bestScore);
+        Log::info('Jumlah tmpl    : ' . $templates->count());
+        Log::info('Template dims  : ' . $templates->map(fn($t) => count(json_decode($t->feature_vector, true)))->join(', '));
 
-        // Cek dimensi tiap template
-        foreach ($templates as $i => $template) {
-            $v = json_decode($template->feature_vector, true);
-            \Illuminate\Support\Facades\Log::info('Template ' . ($i + 1) . ' dim: ' . count($v));
-        }
-
+        // ── MATCHING ──
         if ($bestScore >= $threshold) {
-            // Catat absensi
             Absensi::create([
-                'sesi_absensi_id' => $sesi->id,
-                'mahasiswa_id'    => $mahasiswa->id,
-                'waktu_absen'     => Carbon::now(),
+                'sesi_absensi_id'  => $sesi->id,
+                'mahasiswa_id'     => $mahasiswa->id,
+                'waktu_absen'      => Carbon::now(),
                 'similarity_score' => $bestScore,
-                'status'          => 'hadir',
+                'status'           => 'hadir',
             ]);
 
             return response()->json([
                 'message'    => 'Absensi berhasil!',
-                'similarity' => $bestScore,
+                'similarity' => round($bestScore, 4),
+                'threshold'  => round($threshold, 4),
                 'status'     => 'hadir',
             ]);
         }
 
         return response()->json([
-            'message'    => 'Telapak tangan tidak dikenali',
-            'similarity' => $bestScore,
+            'message'    => 'Telapak tangan tidak dikenali. Pastikan pencahayaan cukup dan telapak tangan terlihat jelas.',
+            'similarity' => round($bestScore, 4),
+            'threshold'  => round($threshold, 4),
         ], 401);
     }
 }

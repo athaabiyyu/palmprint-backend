@@ -35,6 +35,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/pilih-kelas', [AuthController::class,          'pilihKelas']);
     Route::get('/profil',      [AuthController::class,          'profil']);
 
+     // ── Palmprint version check & re-registrasi ──
+    Route::post('/palmprint/re-register', [AuthController::class, 'reRegisterPalmprint']);
+    Route::get('/palmprint/status',       [AuthController::class, 'cekStatusTemplate']);
+    
     // Mahasiswa
     Route::prefix('mahasiswa')->group(function () {
         Route::get('jadwal-hari-ini', [JadwalMahasiswaController::class, 'jadwalHariIni']);
