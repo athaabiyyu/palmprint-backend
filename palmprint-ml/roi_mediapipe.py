@@ -139,26 +139,17 @@ def _compute_dynamic_roi_size(lm, w, h):
     """
     Hitung ukuran ROI secara dinamis berdasarkan jarak antar landmark.
 
-    Masalah: ROI fixed 200px tidak cocok untuk semua jarak kamera.
-    - Tangan dekat (dataset TJI) → telapak besar di piksel → 200px pas
-    - Tangan jauh (kamera HP)   → telapak kecil di piksel → 200px terlalu besar,
-      banyak background masuk, detail garis hilang setelah resize ke 64x64
+    - Tangan dekat (dataset TJI) → dist besar → tapi di-clamp agar tidak overflow
+    - Tangan jauh (kamera HP)   → dist kecil → crop tight ke telapak
 
-    Solusi: ukuran ROI = 1.4× jarak wrist ke middle MCP
-    - Faktor 1.4 dipilih agar ROI mencakup area telapak penuh (tidak sampai ujung jari)
-    - Di-clamp antara ROI_SIZE_MIN dan ROI_SIZE_MAX untuk safety
-
-    Args:
-        lm : hand_landmarks dari MediaPipe (list 21 landmark)
-        w, h: dimensi gambar dalam piksel
-
-    Returns:
-        roi_size (int): ukuran sisi ROI dalam piksel
+    Faktor 1.1 (turun dari 1.4):
+      Lebih aman untuk dataset TJI yang sudah zoom-in.
+      Untuk kamera HP, dynamic ROI tetap lebih besar dari fixed 200px
+      sehingga tetap tight ke telapak.
     """
-    ROI_SIZE_MIN = 120   # minimum: tangan sangat jauh
-    ROI_SIZE_MAX = 400   # maximum: tangan sangat dekat
+    ROI_SIZE_MIN = 100
+    ROI_SIZE_MAX = 320  # turun dari 400
 
-    # Jarak wrist (lm 0) ke middle MCP (lm 9) dalam piksel
     wrist_x  = lm[0].x * w
     wrist_y  = lm[0].y * h
     mid_x    = lm[9].x * w
@@ -166,8 +157,8 @@ def _compute_dynamic_roi_size(lm, w, h):
 
     dist_wrist_to_mid = np.sqrt((mid_x - wrist_x)**2 + (mid_y - wrist_y)**2)
 
-    # ROI = 1.4× jarak wrist-middle (empiris: mencakup telapak tanpa jari)
-    roi_size = int(dist_wrist_to_mid * 1.4)
+    # Faktor 1.1 — lebih konservatif, aman untuk kedua kondisi
+    roi_size = int(dist_wrist_to_mid * 1.1)
     roi_size = int(np.clip(roi_size, ROI_SIZE_MIN, ROI_SIZE_MAX))
 
     return roi_size
@@ -219,23 +210,21 @@ def _get_palm_centroid(img_bgr):
         # Panjang tangan = jarak wrist ke rata-rata MCP (dalam piksel)
         hand_len = np.sqrt((mcp_cx - wrist_x)**2 + (mcp_cy - wrist_y)**2)
 
-        # Arah unit vector dari MCP ke wrist (arah "ke bawah" sepanjang tangan)
-        # Dipakai untuk menggeser centroid ke arah wrist secara proporsional
+        # Arah unit vector dari WRIST ke MCP (ke atas, arah jari)
         if hand_len > 0:
             dir_x = (mcp_cx - wrist_x) / hand_len
             dir_y = (mcp_cy - wrist_y) / hand_len
         else:
             dir_x, dir_y = 0, -1
 
-        # Mulai dari midpoint MCP-wrist, geser 15% panjang tangan ke arah wrist
-        # Hasil: centroid mendarat di zona garis M (area tengah telapak bawah)
+        # Mulai dari midpoint, geser 20% ke arah MCP (ke atas menuju telapak tengah)
         mid_x = int((wrist_x + mcp_cx) / 2)
         mid_y = int((wrist_y + mcp_cy) / 2)
-        offset = hand_len * 0.20  # geser 20% ke arah MCP
+        offset = hand_len * 0.20
 
         cx = int(mid_x + dir_x * offset)
         cy = int(mid_y + dir_y * offset)
-        
+
         # Clamp centroid agar crop tidak keluar batas gambar
         half = dynamic_size // 2
         cx = max(half, min(w - half, cx))

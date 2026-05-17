@@ -39,19 +39,101 @@ OUTPUT_DIR = 'debug_output'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
+def normalize_illumination(img_gray):
+    """
+    Normalisasi pencahayaan menggunakan DoG (Difference of Gaussians).
+ 
+    Masalah yang diselesaikan:
+      Foto dari HP punya variasi brightness yang beragam — terang, gelap,
+      ada bayangan di tangan. Gabor filter akan menghasilkan respons berbeda
+      untuk foto yang sama tapi pencahayaannya beda, padahal polanya sama.
+ 
+    Cara kerja DoG:
+      1. Blur gambar dengan Gaussian kecil (σ=1) → menangkap detail + cahaya
+      2. Blur gambar dengan Gaussian besar (σ=10) → menangkap cahaya global saja
+      3. Selisih keduanya = tekstur murni, bebas dari pencahayaan global
+ 
+      DoG = G(σ=1) - G(σ=10)
+ 
+    Kenapa DoG lebih baik dari CLAHE saja:
+      CLAHE meningkatkan kontras lokal tapi tidak menghilangkan variasi
+      pencahayaan global (tangan terang vs gelap tetap beda).
+      DoG benar-benar memisahkan pencahayaan dari tekstur.
+ 
+    Kenapa σ=1 dan σ=10:
+      σ=1  → tangkap detail halus (lebar blur ~3px, cukup untuk palmprint)
+      σ=10 → tangkap iluminasi global (lebar blur ~30px, smoothing besar)
+      Selisih keduanya = band-pass filter yang menyisakan tekstur skala menengah
+ 
+    Args:
+        img_gray: grayscale image (np.uint8)
+ 
+    Returns:
+        normalized (np.uint8): gambar dengan pencahayaan ternormalisasi,
+                               range 0-255, siap masuk Gabor filter
+    """
+    img_f = img_gray.astype(np.float32)
+ 
+    # Gaussian blur kecil — tangkap detail + sedikit cahaya
+    g_small = cv2.GaussianBlur(img_f, (0, 0), sigmaX=1.0)
+ 
+    # Gaussian blur besar — tangkap pencahayaan global saja
+    g_large = cv2.GaussianBlur(img_f, (0, 0), sigmaX=10.0)
+ 
+    # DoG = selisih → tekstur murni (bisa negatif)
+    dog = g_small - g_large
+ 
+    # Normalize ke 0-255 untuk input Gabor
+    normalized = cv2.normalize(dog, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+ 
+    return normalized
+
+
 def enhance_gabor(img_gray):
+    """
+    [DIMODIFIKASI - FASE 1B]
+    Gabor filter bank multi-orientasi + CLAHE, dengan illumination
+    normalization (DoG) di awal pipeline.
+ 
+    Pipeline baru:
+      img_gray → DoG normalization → Gabor filter bank → max response → CLAHE
+ 
+    Perubahan dari versi lama:
+      - Tambah normalize_illumination(DoG) di baris pertama
+      - Gabor dan CLAHE tetap sama persis
+ 
+    Kenapa DoG di awal, bukan setelah Gabor:
+      Gabor bekerja lebih baik pada input yang sudah bersih dari variasi
+      cahaya global. DoG di awal = beri input terbaik ke Gabor.
+ 
+    Args:
+        img_gray: grayscale ROI (np.uint8), ukuran ROI_SIZE x ROI_SIZE
+ 
+    Returns:
+        enhanced (np.uint8): hasil Gabor+CLAHE setelah normalisasi cahaya
+    """
+    # ── FASE 1B: Normalisasi pencahayaan sebelum Gabor ──
+    img_gray = normalize_illumination(img_gray)
+ 
+    # ── Gabor filter bank (sama persis dengan versi lama) ──
     responses = []
     for theta in GABOR_THETAS:
         kernel = cv2.getGaborKernel(
-            ksize=(GABOR_KSIZE, GABOR_KSIZE),
-            sigma=GABOR_SIGMA, theta=theta,
-            lambd=GABOR_LAMBDA, gamma=GABOR_GAMMA,
-            psi=0, ktype=cv2.CV_32F
+            ksize  = (GABOR_KSIZE, GABOR_KSIZE),
+            sigma  = GABOR_SIGMA,
+            theta  = theta,
+            lambd  = GABOR_LAMBDA,
+            gamma  = GABOR_GAMMA,
+            psi    = 0,
+            ktype  = cv2.CV_32F
         )
         resp = cv2.filter2D(img_gray.astype(np.float32), cv2.CV_32F, kernel)
         responses.append(np.abs(resp))
+ 
     gabor_max = np.max(responses, axis=0)
     gabor_max = cv2.normalize(gabor_max, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+ 
+    # ── CLAHE (sama persis dengan versi lama) ──
     clahe = cv2.createCLAHE(clipLimit=CLAHE_CLIP, tileGridSize=CLAHE_TILE)
     return clahe.apply(gabor_max)
 
