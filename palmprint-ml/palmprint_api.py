@@ -55,11 +55,6 @@ GABOR_LAMBDA = 10.0
 GABOR_GAMMA  = 0.5
 GABOR_THETAS = [0, np.pi/4, np.pi/2, 3*np.pi/4]
 
-# Skin detection — YCrCb range
-SKIN_LOWER_YCR = np.array([0,   133, 77],  dtype=np.uint8)
-SKIN_UPPER_YCR = np.array([255, 173, 127], dtype=np.uint8)
-
-
 # =====================================================================
 # OUTPUT HELPERS
 # =====================================================================
@@ -77,21 +72,6 @@ def output_error(message):
         "status"  : "error",
         "message" : message
     }))
-
-
-# =====================================================================
-# STEP 1 — OPENCV PALM DETECTOR
-# Ganti YOLO → OpenCV YCrCb + HSV skin segmentation
-#
-# Pipeline:
-#   1. YCrCb skin color segmentation
-#   2. HSV skin backup
-#   3. Gabung kedua mask
-#   4. Morphological cleaning (open → close → dilate)
-#   5. Cari kontur terbesar → centroid
-#   6. Fallback: kontur intensity jika skin tidak terdeteksi
-#   7. Center ROI crop ROI_SIZE × ROI_SIZE
-# =====================================================================
 
 
 # =====================================================================
@@ -150,52 +130,66 @@ def normalize_illumination(img_gray):
 # =====================================================================
 # STEP 3 — ENHANCEMENT (Gabor + CLAHE)
 # =====================================================================
-def enhance_gabor(img_gray):
+def enhance_gabor(
+    img_gray,
+    ksize=None,
+    sigma=None,
+    lambd=None,
+    gamma=None,
+    thetas=None,
+    use_dog=False
+):
     """
-    [DIMODIFIKASI - FASE 1B]
-    Gabor filter bank multi-orientasi + CLAHE, dengan illumination
-    normalization (DoG) di awal pipeline.
- 
-    Pipeline baru:
-      img_gray → DoG normalization → Gabor filter bank → max response → CLAHE
- 
-    Perubahan dari versi lama:
-      - Tambah normalize_illumination(DoG) di baris pertama
-      - Gabor dan CLAHE tetap sama persis
- 
-    Kenapa DoG di awal, bukan setelah Gabor:
-      Gabor bekerja lebih baik pada input yang sudah bersih dari variasi
-      cahaya global. DoG di awal = beri input terbaik ke Gabor.
- 
-    Args:
-        img_gray: grayscale ROI (np.uint8), ukuran ROI_SIZE x ROI_SIZE
- 
-    Returns:
-        enhanced (np.uint8): hasil Gabor+CLAHE setelah normalisasi cahaya
+    Gabor filter bank multi-orientasi + CLAHE.
+    Parameter bisa di-override untuk tuning.
     """
-    # ── FASE 1B: Normalisasi pencahayaan sebelum Gabor ──
-    img_gray = normalize_illumination(img_gray)
- 
-    # ── Gabor filter bank (sama persis dengan versi lama) ──
+
+    ksize  = ksize  or GABOR_KSIZE
+    sigma  = sigma  or GABOR_SIGMA
+    lambd  = lambd  or GABOR_LAMBDA
+    gamma  = gamma  or GABOR_GAMMA
+    thetas = thetas or GABOR_THETAS
+
+    # Optional DoG
+    if use_dog:
+        img_gray = normalize_illumination(img_gray)
+
     responses = []
-    for theta in GABOR_THETAS:
+
+    for theta in thetas:
         kernel = cv2.getGaborKernel(
-            ksize  = (GABOR_KSIZE, GABOR_KSIZE),
-            sigma  = GABOR_SIGMA,
-            theta  = theta,
-            lambd  = GABOR_LAMBDA,
-            gamma  = GABOR_GAMMA,
-            psi    = 0,
-            ktype  = cv2.CV_32F
+            ksize=(ksize, ksize),
+            sigma=sigma,
+            theta=theta,
+            lambd=lambd,
+            gamma=gamma,
+            psi=0,
+            ktype=cv2.CV_32F
         )
-        resp = cv2.filter2D(img_gray.astype(np.float32), cv2.CV_32F, kernel)
+
+        resp = cv2.filter2D(
+            img_gray.astype(np.float32),
+            cv2.CV_32F,
+            kernel
+        )
+
         responses.append(np.abs(resp))
- 
+
     gabor_max = np.max(responses, axis=0)
-    gabor_max = cv2.normalize(gabor_max, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
- 
-    # ── CLAHE (sama persis dengan versi lama) ──
-    clahe = cv2.createCLAHE(clipLimit=CLAHE_CLIP, tileGridSize=CLAHE_TILE)
+
+    gabor_max = cv2.normalize(
+        gabor_max,
+        None,
+        0,
+        255,
+        cv2.NORM_MINMAX
+    ).astype(np.uint8)
+
+    clahe = cv2.createCLAHE(
+        clipLimit=CLAHE_CLIP,
+        tileGridSize=CLAHE_TILE
+    )
+
     return clahe.apply(gabor_max)
 
 
@@ -279,10 +273,10 @@ def process_image(image_path):
         sys.exit(1)
 
     # Pipeline ekstraksi
-    roi      = extract_roi(img)           # OpenCV skin detect + centroid ROI
+    roi      = extract_roi(img)            # MediaPipe: alignment + dynamic ROI crop (Fase 1A)
     debug_path = os.path.join(BASE_DIR, "debug_roi.jpg")
     cv2.imwrite(debug_path, roi)
-    enhanced = enhance_gabor(roi)         # Gabor + CLAHE
+    enhanced = enhance_gabor(roi, use_dog=True)  # aktifkan DoG untuk foto HP
     feat     = extract_hog_sgf(enhanced)  # HOG-SGF (1812 dim, L2-norm)
 
     # Transform dengan model

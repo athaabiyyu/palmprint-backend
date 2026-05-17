@@ -147,8 +147,8 @@ def _compute_dynamic_roi_size(lm, w, h):
       Untuk kamera HP, dynamic ROI tetap lebih besar dari fixed 200px
       sehingga tetap tight ke telapak.
     """
-    ROI_SIZE_MIN = 100
-    ROI_SIZE_MAX = 320  # turun dari 400
+    ROI_SIZE_MIN = 80
+    ROI_SIZE_MAX = 250  # turun dari 400
 
     wrist_x  = lm[0].x * w
     wrist_y  = lm[0].y * h
@@ -158,7 +158,7 @@ def _compute_dynamic_roi_size(lm, w, h):
     dist_wrist_to_mid = np.sqrt((mid_x - wrist_x)**2 + (mid_y - wrist_y)**2)
 
     # Faktor 1.1 — lebih konservatif, aman untuk kedua kondisi
-    roi_size = int(dist_wrist_to_mid * 1.1)
+    roi_size = int(dist_wrist_to_mid * 0.85)
     roi_size = int(np.clip(roi_size, ROI_SIZE_MIN, ROI_SIZE_MAX))
 
     return roi_size

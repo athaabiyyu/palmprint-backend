@@ -1,8 +1,11 @@
 dataset/
 results/
 models/
+testing/
+debug_output/
 *.pt
 *.pth
 *.pkl
 *.tiff
 *.task
+.jpg
