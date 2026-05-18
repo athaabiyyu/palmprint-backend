@@ -1,5 +1,4 @@
 <?php
-
 namespace App\Http\Controllers\Api\Dosen;
 
 use App\Http\Controllers\Controller;
@@ -41,5 +40,56 @@ class AuthDosenController extends Controller
     {
         $request->user()->currentAccessToken()->delete();
         return response()->json(['message' => 'Logout berhasil']);
+    }
+
+    // ── GET profil dosen ──
+    public function profil(Request $request)
+    {
+        return response()->json($request->user());
+    }
+
+    // ── PUT update profil ──
+    public function updateProfil(Request $request)
+    {
+        $dosen = $request->user();
+
+        $request->validate([
+            'nama' => 'required|string|max:100',
+            'nip'  => 'required|string|unique:dosens,nip,' . $dosen->id,
+        ]);
+
+        $dosen->update($request->only(['nama', 'nip']));
+
+        // Update localStorage data via response
+        return response()->json([
+            'message' => 'Profil berhasil diupdate',
+            'data'    => $dosen->fresh(),
+        ]);
+    }
+
+    // ── PUT ganti password ──
+    public function gantiPassword(Request $request)
+    {
+        $dosen = $request->user();
+
+        $request->validate([
+            'password_lama' => 'required|string',
+            'password_baru' => 'required|string|min:6',
+        ]);
+
+        // Cek password lama
+        if (!Hash::check($request->password_lama, $dosen->password)) {
+            return response()->json([
+                'message' => 'Password lama tidak sesuai!'
+            ], 422);
+        }
+
+        $dosen->update([
+            'password' => Hash::make($request->password_baru),
+        ]);
+
+        return response()->json([
+            'message' => 'Password berhasil diubah',
+        ]);
     }
 }

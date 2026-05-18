@@ -35,10 +35,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/pilih-kelas', [AuthController::class,          'pilihKelas']);
     Route::get('/profil',      [AuthController::class,          'profil']);
 
-     // ── Palmprint version check & re-registrasi ──
+    // ── Palmprint version check & re-registrasi ──
     Route::post('/palmprint/re-register', [AuthController::class, 'reRegisterPalmprint']);
     Route::get('/palmprint/status',       [AuthController::class, 'cekStatusTemplate']);
-    
+
     // Mahasiswa
     Route::prefix('mahasiswa')->group(function () {
         Route::get('jadwal-hari-ini', [JadwalMahasiswaController::class, 'jadwalHariIni']);
@@ -104,7 +104,7 @@ Route::prefix('admin')->group(function () {
     Route::get('jadwals/kelas/{kelasId}',    [JadwalController::class, 'byKelas']);
 
     // Rekap Absensi
-    Route::get('rekap/kelas',                [RekapApiController::class, 'kelasByProdi']); 
+    Route::get('rekap/kelas',                [RekapApiController::class, 'kelasByProdi']);
     Route::get('rekap/jadwal/{kelasId}',     [RekapApiController::class, 'jadwalByKelas']);
     Route::get('rekap',                      [RekapApiController::class, 'rekap']);
 });
@@ -119,4 +119,7 @@ Route::middleware('auth:sanctum')->prefix('dosen')->group(function () {
     Route::post('sesi/{id}/tutup',     [SesiAbsensiController::class, 'tutup']);
     Route::get('sesi/{id}/detail',    [SesiAbsensiController::class, 'detail']);
     Route::get('sesi/aktif',          [SesiAbsensiController::class, 'sesiAktif']);
+    Route::get('profil',           [AuthDosenController::class, 'profil']);
+    Route::put('profil',           [AuthDosenController::class, 'updateProfil']);
+    Route::put('ganti-password',   [AuthDosenController::class, 'gantiPassword']);
 });

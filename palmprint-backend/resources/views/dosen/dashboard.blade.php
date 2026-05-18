@@ -47,6 +47,9 @@
         </span>
         <div class="d-flex align-items-center gap-3">
             <span class="text-white" id="namaDosen"></span>
+            <button class="btn btn-outline-light btn-sm" onclick="showModalProfil()">
+                <i class="bi bi-person-circle me-1"></i>Profil
+            </button>
             <button class="btn btn-outline-light btn-sm" onclick="logout()">
                 <i class="bi bi-box-arrow-right me-1"></i>Logout
             </button>
@@ -182,6 +185,78 @@
         </div>
     </div>
 
+    <!-- Modal Profil -->
+    <div class="modal fade" id="modalProfil" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-person-circle me-2"></i>Profil Saya
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+
+                    <!-- Tab -->
+                    <ul class="nav nav-tabs mb-3" id="tabProfil">
+                        <li class="nav-item">
+                            <button class="nav-link active" onclick="switchTab('info')">
+                                <i class="bi bi-person me-1"></i>Info
+                            </button>
+                        </li>
+                        <li class="nav-item">
+                            <button class="nav-link" onclick="switchTab('password')">
+                                <i class="bi bi-key me-1"></i>Ganti Password
+                            </button>
+                        </li>
+                    </ul>
+
+                    <!-- Tab Info -->
+                    <div id="tabInfo">
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">NIP</label>
+                            <input type="text" id="profilNip" class="form-control" placeholder="NIP">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Nama</label>
+                            <input type="text" id="profilNama" class="form-control" placeholder="Nama lengkap">
+                        </div>
+                        <button class="btn btn-primary w-100" onclick="simpanProfil()">
+                            <i class="bi bi-check-lg me-1"></i>Simpan Perubahan
+                        </button>
+                    </div>
+
+                    <!-- Tab Password -->
+                    <div id="tabPassword" class="d-none">
+                        <div class="alert alert-info small">
+                            <i class="bi bi-info-circle me-1"></i>
+                            Password default adalah NIP kamu. Segera ganti setelah login pertama!
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Password Lama</label>
+                            <input type="password" id="passwordLama" class="form-control"
+                                placeholder="Masukkan password lama">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Password Baru</label>
+                            <input type="password" id="passwordBaru" class="form-control"
+                                placeholder="Minimal 6 karakter">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Konfirmasi Password Baru</label>
+                            <input type="password" id="passwordKonfirmasi" class="form-control"
+                                placeholder="Ulangi password baru">
+                        </div>
+                        <button class="btn btn-warning w-100" onclick="simpanPassword()">
+                            <i class="bi bi-key me-1"></i>Ganti Password
+                        </button>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <script>
@@ -220,6 +295,112 @@
             month: 'long',
             day: 'numeric'
         });
+
+        const modalProfil = new bootstrap.Modal(document.getElementById('modalProfil'));
+
+        // ── Show Modal Profil ──
+        function showModalProfil() {
+            // Isi dari localStorage dulu
+            document.getElementById('profilNip').value = dosen.nip ?? '';
+            document.getElementById('profilNama').value = dosen.nama ?? '';
+
+            // Reset tab ke info
+            switchTab('info');
+
+            // Reset field password
+            document.getElementById('passwordLama').value = '';
+            document.getElementById('passwordBaru').value = '';
+            document.getElementById('passwordKonfirmasi').value = '';
+
+            modalProfil.show();
+        }
+
+        // ── Switch Tab ──
+        function switchTab(tab) {
+            const tabInfo = document.getElementById('tabInfo');
+            const tabPassword = document.getElementById('tabPassword');
+            const tabs = document.querySelectorAll('#tabProfil .nav-link');
+
+            if (tab === 'info') {
+                tabInfo.classList.remove('d-none');
+                tabPassword.classList.add('d-none');
+                tabs[0].classList.add('active');
+                tabs[1].classList.remove('active');
+            } else {
+                tabInfo.classList.add('d-none');
+                tabPassword.classList.remove('d-none');
+                tabs[0].classList.remove('active');
+                tabs[1].classList.add('active');
+            }
+        }
+
+        // ── Simpan Profil ──
+        async function simpanProfil() {
+            const nip = document.getElementById('profilNip').value;
+            const nama = document.getElementById('profilNama').value;
+
+            if (!nip || !nama) {
+                alert('NIP dan nama harus diisi!');
+                return;
+            }
+
+            try {
+                const res = await axios.put('/api/dosen/profil', {
+                    nip,
+                    nama
+                });
+
+                // Update localStorage
+                const dosenBaru = res.data.data;
+                localStorage.setItem('dosen_data', JSON.stringify(dosenBaru));
+
+                // Update tampilan navbar
+                document.getElementById('namaDosen').innerText = dosenBaru.nama;
+
+                alert('Profil berhasil diupdate!');
+                modalProfil.hide();
+
+            } catch (e) {
+                alert(e.response?.data?.message ?? 'Gagal menyimpan profil');
+            }
+        }
+
+        // ── Ganti Password ──
+        async function simpanPassword() {
+            const passwordLama = document.getElementById('passwordLama').value;
+            const passwordBaru = document.getElementById('passwordBaru').value;
+            const passwordKonfirmasi = document.getElementById('passwordKonfirmasi').value;
+
+            if (!passwordLama || !passwordBaru || !passwordKonfirmasi) {
+                alert('Semua field password harus diisi!');
+                return;
+            }
+
+            if (passwordBaru !== passwordKonfirmasi) {
+                alert('Konfirmasi password tidak cocok!');
+                return;
+            }
+
+            if (passwordBaru.length < 6) {
+                alert('Password baru minimal 6 karakter!');
+                return;
+            }
+
+            try {
+                await axios.put('/api/dosen/ganti-password', {
+                    password_lama: passwordLama,
+                    password_baru: passwordBaru,
+                });
+
+                alert('Password berhasil diubah! Silakan login ulang.');
+
+                // Logout otomatis setelah ganti password
+                await logout();
+
+            } catch (e) {
+                alert(e.response?.data?.message ?? 'Gagal mengganti password');
+            }
+        }
 
         // ── Load Jadwal Hari Ini ──
         async function loadJadwal() {
@@ -335,17 +516,17 @@
                         </div>
                         ${sesiAktif
                             ? `<button class="btn btn-success btn-sm w-100"
-                                    onclick="lihatDetail(${sesiAktif.id})">
-                                    <i class="bi bi-eye me-1"></i> Lihat Absensi
-                                   </button>`
+                                                onclick="lihatDetail(${sesiAktif.id})">
+                                                <i class="bi bi-eye me-1"></i> Lihat Absensi
+                                               </button>`
                             : isToday
                                 ? `<button class="btn btn-primary btn-sm w-100"
-                                        onclick="showModalBuka(${j.id}, '${j.mata_kuliah.nama}', '${j.kelas.nama}')">
-                                        <i class="bi bi-unlock me-1"></i> Buka Absensi
-                                       </button>`
+                                                    onclick="showModalBuka(${j.id}, '${j.mata_kuliah.nama}', '${j.kelas.nama}')">
+                                                    <i class="bi bi-unlock me-1"></i> Buka Absensi
+                                                   </button>`
                                 : `<button class="btn btn-secondary btn-sm w-100" disabled>
-                                        <i class="bi bi-lock me-1"></i> Bukan Hari Ini
-                                       </button>`
+                                                    <i class="bi bi-lock me-1"></i> Bukan Hari Ini
+                                                   </button>`
                         }
                     </div>
                 </div>
