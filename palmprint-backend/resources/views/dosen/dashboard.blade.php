@@ -56,9 +56,10 @@
     <div class="container py-4">
 
         <!-- Header hari ini -->
-        <div class="d-flex justify-content-between align-items-center mb-4">
+        <!-- Header -->
+        <div class="d-flex justify-content-between align-items-center mb-3">
             <div>
-                <h5 class="fw-bold mb-0">Jadwal Hari Ini</h5>
+                <h5 class="fw-bold mb-0" id="judulJadwal">Jadwal Hari Ini</h5>
                 <small class="text-muted" id="tanggalHariIni"></small>
             </div>
             <button class="btn btn-outline-primary btn-sm" onclick="loadJadwal()">
@@ -66,11 +67,37 @@
             </button>
         </div>
 
+        <!-- Filter Hari -->
+        <div class="d-flex gap-2 mb-4 flex-wrap">
+            <button class="btn btn-primary btn-sm filter-hari" data-hari="" onclick="setFilterHari(this, '')">
+                Semua
+            </button>
+            <button class="btn btn-outline-secondary btn-sm filter-hari" data-hari="senin"
+                onclick="setFilterHari(this, 'senin')">
+                Senin
+            </button>
+            <button class="btn btn-outline-secondary btn-sm filter-hari" data-hari="selasa"
+                onclick="setFilterHari(this, 'selasa')">
+                Selasa
+            </button>
+            <button class="btn btn-outline-secondary btn-sm filter-hari" data-hari="rabu"
+                onclick="setFilterHari(this, 'rabu')">
+                Rabu
+            </button>
+            <button class="btn btn-outline-secondary btn-sm filter-hari" data-hari="kamis"
+                onclick="setFilterHari(this, 'kamis')">
+                Kamis
+            </button>
+            <button class="btn btn-outline-secondary btn-sm filter-hari" data-hari="jumat"
+                onclick="setFilterHari(this, 'jumat')">
+                Jumat
+            </button>
+        </div>
+
         <!-- Jadwal Cards -->
         <div id="jadwalContainer" class="row g-3">
             <div class="col-12 text-center text-muted">Memuat jadwal...</div>
         </div>
-
     </div>
 
     <!-- Modal Buka Sesi -->
@@ -169,6 +196,9 @@
         const dosen = JSON.parse(localStorage.getItem('dosen_data') ?? '{}');
         let activeSesiId = null;
         let countdownTimer = null;
+        let filterHari = null;
+        let allJadwals = [];
+        let hariSekarang = '';
 
         // Tambahkan ini
         const hariMap = {
@@ -198,60 +228,27 @@
 
             try {
                 const res = await axios.get('/api/dosen/jadwal-hari-ini');
-                const data = res.data;
+                allJadwals = res.data;
 
-                if (data.length === 0) {
-                    container.innerHTML = `
-                <div class="col-12">
-                    <div class="alert alert-info text-center">
-                        <i class="bi bi-calendar-x fs-3 d-block mb-2"></i>
-                        Tidak ada jadwal hari ini
-                    </div>
-                </div>`;
-                    return;
+                // Simpan hari sekarang dari data
+                const today = allJadwals.find(j => j.is_today);
+                if (today) hariSekarang = today.hari;
+
+                // Jika belum ada filter, default ke hari ini
+                if (filterHari === null) {
+                    filterHari = hariSekarang;
+                    // Aktifkan tombol hari ini
+                    document.querySelectorAll('.filter-hari').forEach(btn => {
+                        btn.classList.remove('btn-primary', 'btn-outline-secondary');
+                        if (btn.dataset.hari === filterHari) {
+                            btn.classList.add('btn-primary');
+                        } else {
+                            btn.classList.add('btn-outline-secondary');
+                        }
+                    });
                 }
 
-                container.innerHTML = data.map(j => {
-                    const sesiAktif = j.sesi_aktif;
-                    const isToday = j.is_today;
-
-                    return `
-        <div class="col-md-6">
-            <div class="card border-0 shadow-sm card-jadwal ${isToday ? 'border-primary border-2' : 'opacity-75'}">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-start mb-2">
-                        <div>
-                            <h6 class="fw-bold mb-0">${j.mata_kuliah.nama}</h6>
-                            <small class="text-muted">${j.kelas.nama} • ${j.mata_kuliah.sks} SKS</small>
-                        </div>
-                        <div class="d-flex flex-column gap-1 align-items-end">
-                            ${isToday
-                                ? '<span class="badge bg-primary">Hari Ini</span>'
-                                : `<span class="badge bg-light text-dark">${hariMap[j.hari]}</span>`
-                            }
-                            ${sesiAktif
-                                ? '<span class="badge bg-success">Sesi Aktif</span>'
-                                : ''
-                            }
-                        </div>
-                    </div>
-                    <div class="text-muted small mb-3">
-                        <i class="bi bi-clock me-1"></i>${j.jam_mulai} - ${j.jam_selesai}
-                        ${j.ruangan ? `<i class="bi bi-geo-alt ms-2 me-1"></i>${j.ruangan}` : ''}
-                    </div>
-                    ${sesiAktif
-    ? `<button class="btn btn-success btn-sm w-100" onclick="lihatDetail(${sesiAktif.id})">
-                <i class="bi bi-eye me-1"></i> Lihat Absensi
-           </button>`
-    : `<button class="btn btn-primary btn-sm w-100" onclick="showModalBuka(${j.id}, '${j.mata_kuliah.nama}', '${j.kelas.nama}')">
-                <i class="bi bi-unlock me-1"></i> Buka Absensi
-           </button>`
-}
-                </div>
-            </div>
-        </div>
-    `;
-                }).join('');
+                renderJadwal();
 
             } catch (e) {
                 if (e.response?.status === 401) {
@@ -259,6 +256,102 @@
                     window.location.href = '/dosen/login';
                 }
             }
+        }
+
+        // ── Set Filter Hari ──
+        function setFilterHari(btn, hari) {
+            filterHari = hari;
+
+            // Update tombol aktif
+            document.querySelectorAll('.filter-hari').forEach(b => {
+                b.classList.remove('btn-primary');
+                b.classList.add('btn-outline-secondary');
+            });
+            btn.classList.remove('btn-outline-secondary');
+            btn.classList.add('btn-primary');
+
+            // Update judul
+            const hariLabels = {
+                '': 'Semua Jadwal',
+                'senin': 'Jadwal Senin',
+                'selasa': 'Jadwal Selasa',
+                'rabu': 'Jadwal Rabu',
+                'kamis': 'Jadwal Kamis',
+                'jumat': 'Jadwal Jumat',
+            };
+            document.getElementById('judulJadwal').innerText =
+                hari === hariSekarang ? 'Jadwal Hari Ini' : (hariLabels[hari] ?? 'Semua Jadwal');
+
+            renderJadwal();
+        }
+
+        // ── Render Jadwal berdasarkan filter ──
+        function renderJadwal() {
+            const container = document.getElementById('jadwalContainer');
+
+            // Filter data
+            const filtered = filterHari === '' ?
+                allJadwals :
+                allJadwals.filter(j => j.hari === filterHari);
+
+            if (filtered.length === 0) {
+                container.innerHTML = `
+            <div class="col-12">
+                <div class="alert alert-info text-center">
+                    <i class="bi bi-calendar-x fs-3 d-block mb-2"></i>
+                    Tidak ada jadwal ${filterHari === hariSekarang ? 'hari ini' : 'di hari ini'}
+                </div>
+            </div>`;
+                return;
+            }
+
+            container.innerHTML = filtered.map(j => {
+                const sesiAktif = j.sesi_aktif;
+                const isToday = j.is_today;
+
+                return `
+            <div class="col-md-6">
+                <div class="card border-0 shadow-sm card-jadwal ${isToday ? 'border-primary border-2' : 'opacity-75'}">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <div>
+                                <h6 class="fw-bold mb-0">${j.mata_kuliah.nama}</h6>
+                                <small class="text-muted">${j.kelas.nama} • ${j.mata_kuliah.sks} SKS</small>
+                            </div>
+                            <div class="d-flex flex-column gap-1 align-items-end">
+                                ${isToday
+                                    ? '<span class="badge bg-primary">Hari Ini</span>'
+                                    : `<span class="badge bg-light text-dark">${hariMap[j.hari]}</span>`
+                                }
+                                ${sesiAktif
+                                    ? '<span class="badge bg-success">Sesi Aktif</span>'
+                                    : ''
+                                }
+                            </div>
+                        </div>
+                        <div class="text-muted small mb-3">
+                            <i class="bi bi-clock me-1"></i>${j.jam_mulai} - ${j.jam_selesai}
+                            ${j.ruangan ? `<i class="bi bi-geo-alt ms-2 me-1"></i>${j.ruangan}` : ''}
+                        </div>
+                        ${sesiAktif
+                            ? `<button class="btn btn-success btn-sm w-100"
+                                    onclick="lihatDetail(${sesiAktif.id})">
+                                    <i class="bi bi-eye me-1"></i> Lihat Absensi
+                                   </button>`
+                            : isToday
+                                ? `<button class="btn btn-primary btn-sm w-100"
+                                        onclick="showModalBuka(${j.id}, '${j.mata_kuliah.nama}', '${j.kelas.nama}')">
+                                        <i class="bi bi-unlock me-1"></i> Buka Absensi
+                                       </button>`
+                                : `<button class="btn btn-secondary btn-sm w-100" disabled>
+                                        <i class="bi bi-lock me-1"></i> Bukan Hari Ini
+                                       </button>`
+                        }
+                    </div>
+                </div>
+            </div>
+        `;
+            }).join('');
         }
 
         // ── Show Modal Buka Sesi ──
