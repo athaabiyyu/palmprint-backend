@@ -122,4 +122,7 @@ Route::middleware('auth:sanctum')->prefix('dosen')->group(function () {
     Route::get('profil',           [AuthDosenController::class, 'profil']);
     Route::put('profil',           [AuthDosenController::class, 'updateProfil']);
     Route::put('ganti-password',   [AuthDosenController::class, 'gantiPassword']);
+    Route::get('rekap',              [SesiAbsensiController::class, 'rekapMatkul']);
+    Route::get('rekap/{jadwalId}',   [SesiAbsensiController::class, 'rekapDetail']);
+    Route::get('rekap/{jadwalId}/riwayat', [SesiAbsensiController::class, 'riwayat']);
 });

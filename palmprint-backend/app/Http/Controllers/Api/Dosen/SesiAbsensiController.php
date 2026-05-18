@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Http\Controllers\Api\Dosen;
 
 use App\Http\Controllers\Controller;
@@ -17,8 +18,10 @@ class SesiAbsensiController extends Controller
         $hariIni = strtolower(Carbon::now()->locale('id')->dayName);
 
         $hariMap = [
-            'senin'  => 'senin',  'selasa' => 'selasa',
-            'rabu'   => 'rabu',   'kamis'  => 'kamis',
+            'senin'  => 'senin',
+            'selasa' => 'selasa',
+            'rabu'   => 'rabu',
+            'kamis'  => 'kamis',
             'jumat'  => 'jumat',
         ];
 
@@ -149,5 +152,119 @@ class SesiAbsensiController extends Controller
             ->values();
 
         return response()->json($sesiAktif);
+    }
+
+    // ── Rekap kehadiran per MK milik dosen ──
+    public function rekapMatkul(Request $request)
+    {
+        $dosen = $request->user();
+
+        // Ambil semua jadwal milik dosen
+        $jadwals = Jadwal::with(['mataKuliah', 'kelas', 'semester'])
+            ->where('dosen_id', $dosen->id)
+            ->whereHas('semester', fn($q) => $q->where('is_active', true))
+            ->orderBy('hari')
+            ->orderBy('jam_mulai')
+            ->get();
+
+        return response()->json($jadwals);
+    }
+
+    // ── Detail rekap per jadwal ──
+    public function rekapDetail(Request $request, $jadwalId)
+    {
+        $dosen  = $request->user();
+        $jadwal = Jadwal::with([
+            'mataKuliah',
+            'kelas.mahasiswas',
+            'semester'
+        ])->where('dosen_id', $dosen->id)
+            ->findOrFail($jadwalId);
+
+        $query = SesiAbsensi::where('jadwal_id', $jadwalId);
+        if ($request->tanggal_dari)   $query->whereDate('tanggal', '>=', $request->tanggal_dari);
+        if ($request->tanggal_sampai) $query->whereDate('tanggal', '<=', $request->tanggal_sampai);
+        $sesis = $query->orderBy('tanggal')->get();
+
+        $mahasiswas = $jadwal->kelas->mahasiswas;
+
+        $rekap = $mahasiswas->map(function ($m) use ($sesis) {
+            $detail = $sesis->map(function ($sesi) use ($m) {
+                $absensi = Absensi::where('sesi_absensi_id', $sesi->id)
+                    ->where('mahasiswa_id', $m->id)
+                    ->first();
+                return [
+                    'tanggal' => $sesi->tanggal,
+                    'status'  => $absensi ? $absensi->status : 'alpha',
+                ];
+            });
+
+            $hadir = $detail->where('status', 'hadir')->count();
+            $alpha = $detail->where('status', 'alpha')->count();
+            $izin  = $detail->where('status', 'izin')->count();
+            $sakit = $detail->where('status', 'sakit')->count();
+            $total = $sesis->count();
+
+            return [
+                'nim'        => $m->nim,
+                'nama'       => $m->nama,
+                'hadir'      => $hadir,
+                'alpha'      => $alpha,
+                'izin'       => $izin,
+                'sakit'      => $sakit,
+                'total_sesi' => $total,
+                'persentase' => $total > 0 ? round(($hadir / $total) * 100) : 0,
+            ];
+        });
+
+        return response()->json([
+            'jadwal' => $jadwal,
+            'sesis'  => $sesis,
+            'rekap'  => $rekap,
+        ]);
+    }
+
+    // ── Riwayat sesi per jadwal ──
+    public function riwayat(Request $request, $jadwalId)
+    {
+        $dosen  = $request->user();
+
+        // Pastikan jadwal milik dosen ini
+        $jadwal = Jadwal::with(['mataKuliah', 'kelas'])
+            ->where('dosen_id', $dosen->id)
+            ->findOrFail($jadwalId);
+
+        $sesis = SesiAbsensi::where('jadwal_id', $jadwalId)
+            ->withCount([
+                'absensis as jumlah_hadir' => fn($q) => $q->where('status', 'hadir'),
+                'absensis as jumlah_izin'  => fn($q) => $q->where('status', 'izin'),
+                'absensis as jumlah_sakit' => fn($q) => $q->where('status', 'sakit'),
+            ])
+            ->orderByDesc('tanggal')
+            ->get()
+            ->map(function ($s) use ($jadwal) {
+                $totalMahasiswa = $jadwal->kelas->mahasiswas()->count();
+                return [
+                    'id'              => $s->id,
+                    'tanggal'         => $s->tanggal,
+                    'dibuka_at'       => $s->dibuka_at,
+                    'ditutup_at'      => $s->ditutup_at,
+                    'durasi_menit'    => $s->durasi_menit,
+                    'is_active'       => $s->is_active,
+                    'jumlah_hadir'    => $s->jumlah_hadir,
+                    'jumlah_izin'     => $s->jumlah_izin,
+                    'jumlah_sakit'    => $s->jumlah_sakit,
+                    'jumlah_alpha'    => $totalMahasiswa - $s->jumlah_hadir - $s->jumlah_izin - $s->jumlah_sakit,
+                    'total_mahasiswa' => $totalMahasiswa,
+                    'persentase'      => $totalMahasiswa > 0
+                        ? round(($s->jumlah_hadir / $totalMahasiswa) * 100)
+                        : 0,
+                ];
+            });
+
+        return response()->json([
+            'jadwal' => $jadwal,
+            'sesis'  => $sesis,
+        ]);
     }
 }

@@ -50,6 +50,9 @@
             <button class="btn btn-outline-light btn-sm" onclick="showModalProfil()">
                 <i class="bi bi-person-circle me-1"></i>Profil
             </button>
+            <button class="btn btn-outline-light btn-sm" onclick="showModalRekap()">
+                <i class="bi bi-clipboard-data me-1"></i>Rekap
+            </button>
             <button class="btn btn-outline-light btn-sm" onclick="logout()">
                 <i class="bi bi-box-arrow-right me-1"></i>Logout
             </button>
@@ -257,6 +260,148 @@
         </div>
     </div>
 
+    <!-- Modal Rekap -->
+    <div class="modal fade" id="modalRekap" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-clipboard-data me-2"></i>Rekap Kehadiran
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+
+                    <!-- Filter -->
+                    <div class="row g-2 align-items-end mb-4">
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Mata Kuliah</label>
+                            <select id="rekapJadwalId" class="form-select">
+                                <option value="">-- Pilih Mata Kuliah --</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-semibold">Dari Tanggal</label>
+                            <input type="date" id="rekapDari" class="form-control">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-semibold">Sampai Tanggal</label>
+                            <input type="date" id="rekapSampai" class="form-control">
+                        </div>
+                        <div class="col-md-2 d-flex gap-1">
+                            <button class="btn btn-primary w-100" onclick="loadRekapDetail()">
+                                <i class="bi bi-search me-1"></i> Tampilkan
+                            </button>
+                            <button class="btn btn-outline-secondary" onclick="loadRiwayat()" title="Riwayat Sesi">
+                                <i class="bi bi-clock-history"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Info Jadwal -->
+                    <div id="rekapInfo" class="d-none">
+                        <div class="card border-0 bg-light mb-3">
+                            <div class="card-body py-2">
+                                <div class="row">
+                                    <div class="col-md-3">
+                                        <small class="text-muted">Mata Kuliah</small>
+                                        <div class="fw-bold" id="rekapInfoMatkul">-</div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <small class="text-muted">Kelas</small>
+                                        <div class="fw-bold" id="rekapInfoKelas">-</div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <small class="text-muted">Total Pertemuan</small>
+                                        <div class="fw-bold" id="rekapInfoPertemuan">-</div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <small class="text-muted">Total Mahasiswa</small>
+                                        <div class="fw-bold" id="rekapInfoMahasiswa">-</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Tabel -->
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>No</th>
+                                        <th>NIM</th>
+                                        <th>Nama</th>
+                                        <th class="text-center text-success">Hadir</th>
+                                        <th class="text-center text-danger">Alpha</th>
+                                        <th class="text-center text-warning">Izin</th>
+                                        <th class="text-center text-info">Sakit</th>
+                                        <th class="text-center">% Hadir</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="rekapBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Empty State -->
+                    <div id="rekapEmpty" class="text-center text-muted py-4">
+                        <i class="bi bi-clipboard-data fs-1 d-block mb-2"></i>
+                        Pilih mata kuliah untuk melihat rekap kehadiran
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Riwayat Sesi -->
+    <div class="modal fade" id="modalRiwayat" tabindex="-1" style="z-index:1060">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-clock-history me-2"></i>Riwayat Sesi Absensi
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="riwayatInfo" class="mb-3">
+                        <span class="fw-bold" id="riwayatMatkul">-</span>
+                        <span class="text-muted ms-2" id="riwayatKelas">-</span>
+                    </div>
+
+                    <div id="riwayatLoading" class="text-center py-4">
+                        <div class="spinner-border text-primary"></div>
+                    </div>
+
+                    <div id="riwayatContent" class="d-none">
+                        <table class="table table-hover align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>No</th>
+                                    <th>Tanggal</th>
+                                    <th>Dibuka</th>
+                                    <th>Ditutup</th>
+                                    <th class="text-center">Hadir</th>
+                                    <th class="text-center">Alpha</th>
+                                    <th class="text-center">% Hadir</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="riwayatBody"></tbody>
+                        </table>
+
+                        <div id="riwayatEmpty" class="text-center text-muted py-4 d-none">
+                            <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                            Belum ada sesi yang pernah dibuka
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <script>
@@ -402,6 +547,222 @@
             }
         }
 
+        const modalRekap = new bootstrap.Modal(document.getElementById('modalRekap'));
+        let allJadwalRekap = [];
+
+        // ── Show Modal Rekap ──
+        async function showModalRekap() {
+            // Load daftar jadwal milik dosen
+            try {
+                const res = await axios.get('/api/dosen/rekap');
+                allJadwalRekap = res.data;
+
+                const select = document.getElementById('rekapJadwalId');
+                select.innerHTML = '<option value="">-- Pilih Mata Kuliah --</option>';
+
+                const hariLabels = {
+                    senin: 'Sen',
+                    selasa: 'Sel',
+                    rabu: 'Rab',
+                    kamis: 'Kam',
+                    jumat: 'Jum'
+                };
+
+                allJadwalRekap.forEach(j => {
+                    select.innerHTML += `
+                <option value="${j.id}">
+                    ${j.mata_kuliah.nama} — ${j.kelas.nama}
+                    (${hariLabels[j.hari]} ${j.jam_mulai.substring(0,5)})
+                </option>`;
+                });
+
+                // Reset tampilan
+                document.getElementById('rekapInfo').classList.add('d-none');
+                document.getElementById('rekapEmpty').classList.remove('d-none');
+                document.getElementById('rekapDari').value = '';
+                document.getElementById('rekapSampai').value = '';
+
+                modalRekap.show();
+
+            } catch (e) {
+                alert('Gagal memuat data rekap');
+            }
+        }
+
+        // ── Load Detail Rekap ──
+        async function loadRekapDetail() {
+            const jadwalId = document.getElementById('rekapJadwalId').value;
+            const dari = document.getElementById('rekapDari').value;
+            const sampai = document.getElementById('rekapSampai').value;
+
+            if (!jadwalId) {
+                alert('Pilih mata kuliah terlebih dahulu!');
+                return;
+            }
+
+            try {
+                let url = `/api/dosen/rekap/${jadwalId}`;
+                const params = new URLSearchParams();
+                if (dari) params.append('tanggal_dari', dari);
+                if (sampai) params.append('tanggal_sampai', sampai);
+                if (params.toString()) url += '?' + params.toString();
+
+                const res = await axios.get(url);
+                const data = res.data;
+
+                // Update info
+                document.getElementById('rekapInfoMatkul').innerText = data.jadwal.mata_kuliah.nama;
+                document.getElementById('rekapInfoKelas').innerText = data.jadwal.kelas.nama;
+                document.getElementById('rekapInfoPertemuan').innerText = data.sesis.length + ' pertemuan';
+                document.getElementById('rekapInfoMahasiswa').innerText = data.rekap.length + ' mahasiswa';
+
+                // Render tabel
+                const tbody = document.getElementById('rekapBody');
+                if (data.rekap.length === 0) {
+                    tbody.innerHTML =
+                        '<tr><td colspan="9" class="text-center text-muted">Belum ada data absensi</td></tr>';
+                } else {
+                    tbody.innerHTML = data.rekap.map((m, i) => {
+                        const persen = m.persentase;
+                        const warna = persen >= 75 ? 'success' : persen >= 50 ? 'warning' : 'danger';
+                        const status = persen >= 75 ? 'Lulus' : 'Tidak Lulus';
+                        const statusColor = persen >= 75 ? 'success' : 'danger';
+
+                        return `
+                    <tr>
+                        <td>${i + 1}</td>
+                        <td><span class="badge bg-dark">${m.nim}</span></td>
+                        <td>${m.nama}</td>
+                        <td class="text-center">
+                            <span class="badge bg-success">${m.hadir}</span>
+                        </td>
+                        <td class="text-center">
+                            <span class="badge bg-danger">${m.alpha}</span>
+                        </td>
+                        <td class="text-center">
+                            <span class="badge bg-warning text-dark">${m.izin}</span>
+                        </td>
+                        <td class="text-center">
+                            <span class="badge bg-info text-dark">${m.sakit}</span>
+                        </td>
+                        <td class="text-center" style="min-width:120px">
+                            <div class="progress" style="height:20px">
+                                <div class="progress-bar bg-${warna}"
+                                    style="width:${persen}%">
+                                    ${persen}%
+                                </div>
+                            </div>
+                        </td>
+                        <td>
+                            <span class="badge bg-${statusColor}">${status}</span>
+                        </td>
+                    </tr>
+                `;
+                    }).join('');
+                }
+
+                document.getElementById('rekapInfo').classList.remove('d-none');
+                document.getElementById('rekapEmpty').classList.add('d-none');
+
+            } catch (e) {
+                alert(e.response?.data?.message ?? 'Gagal memuat rekap');
+            }
+        }
+
+        const modalRiwayat = new bootstrap.Modal(document.getElementById('modalRiwayat'));
+
+        // ── Load Riwayat Sesi ──
+        async function loadRiwayat() {
+            const jadwalId = document.getElementById('rekapJadwalId').value;
+
+            if (!jadwalId) {
+                alert('Pilih mata kuliah terlebih dahulu!');
+                return;
+            }
+
+            // Tampilkan modal riwayat
+            document.getElementById('riwayatLoading').classList.remove('d-none');
+            document.getElementById('riwayatContent').classList.add('d-none');
+            modalRiwayat.show();
+
+            try {
+                const res = await axios.get(`/api/dosen/rekap/${jadwalId}/riwayat`);
+                const data = res.data;
+
+                // Update info
+                document.getElementById('riwayatMatkul').innerText = data.jadwal.mata_kuliah.nama;
+                document.getElementById('riwayatKelas').innerText = '— ' + data.jadwal.kelas.nama;
+
+                // Render tabel
+                const tbody = document.getElementById('riwayatBody');
+                const empty = document.getElementById('riwayatEmpty');
+
+                if (data.sesis.length === 0) {
+                    tbody.innerHTML = '';
+                    empty.classList.remove('d-none');
+                } else {
+                    empty.classList.add('d-none');
+                    tbody.innerHTML = data.sesis.map((s, i) => {
+                        const warna = s.persentase >= 75 ? 'success' :
+                            s.persentase >= 50 ? 'warning' : 'danger';
+
+                        const dibuka = s.dibuka_at ?
+                            new Date(s.dibuka_at).toLocaleTimeString('id-ID', {
+                                hour: '2-digit',
+                                minute: '2-digit'
+                            }) :
+                            '-';
+                        const ditutup = s.ditutup_at ?
+                            new Date(s.ditutup_at).toLocaleTimeString('id-ID', {
+                                hour: '2-digit',
+                                minute: '2-digit'
+                            }) :
+                            '-';
+
+                        return `
+                    <tr>
+                        <td>${i + 1}</td>
+                        <td>
+                            <div class="fw-semibold">${s.tanggal}</div>
+                            <small class="text-muted">${s.durasi_menit} menit</small>
+                        </td>
+                        <td><small>${dibuka}</small></td>
+                        <td><small>${ditutup}</small></td>
+                        <td class="text-center">
+                            <span class="badge bg-success">${s.jumlah_hadir}</span>
+                            <small class="text-muted">/ ${s.total_mahasiswa}</small>
+                        </td>
+                        <td class="text-center">
+                            <span class="badge bg-danger">${s.jumlah_alpha}</span>
+                        </td>
+                        <td class="text-center" style="min-width:100px">
+                            <div class="progress" style="height:16px">
+                                <div class="progress-bar bg-${warna}"
+                                    style="width:${s.persentase}%">
+                                    ${s.persentase}%
+                                </div>
+                            </div>
+                        </td>
+                        <td>
+                            ${s.is_active
+                                ? '<span class="badge bg-success">Aktif</span>'
+                                : '<span class="badge bg-secondary">Selesai</span>'
+                            }
+                        </td>
+                    </tr>
+                `;
+                    }).join('');
+                }
+
+                document.getElementById('riwayatLoading').classList.add('d-none');
+                document.getElementById('riwayatContent').classList.remove('d-none');
+
+            } catch (e) {
+                alert('Gagal memuat riwayat sesi');
+                modalRiwayat.hide();
+            }
+        }
+
         // ── Load Jadwal Hari Ini ──
         async function loadJadwal() {
             const container = document.getElementById('jadwalContainer');
@@ -516,17 +877,17 @@
                         </div>
                         ${sesiAktif
                             ? `<button class="btn btn-success btn-sm w-100"
-                                                onclick="lihatDetail(${sesiAktif.id})">
-                                                <i class="bi bi-eye me-1"></i> Lihat Absensi
-                                               </button>`
+                                                                        onclick="lihatDetail(${sesiAktif.id})">
+                                                                        <i class="bi bi-eye me-1"></i> Lihat Absensi
+                                                                       </button>`
                             : isToday
                                 ? `<button class="btn btn-primary btn-sm w-100"
-                                                    onclick="showModalBuka(${j.id}, '${j.mata_kuliah.nama}', '${j.kelas.nama}')">
-                                                    <i class="bi bi-unlock me-1"></i> Buka Absensi
-                                                   </button>`
+                                                                            onclick="showModalBuka(${j.id}, '${j.mata_kuliah.nama}', '${j.kelas.nama}')">
+                                                                            <i class="bi bi-unlock me-1"></i> Buka Absensi
+                                                                           </button>`
                                 : `<button class="btn btn-secondary btn-sm w-100" disabled>
-                                                    <i class="bi bi-lock me-1"></i> Bukan Hari Ini
-                                                   </button>`
+                                                                            <i class="bi bi-lock me-1"></i> Bukan Hari Ini
+                                                                           </button>`
                         }
                     </div>
                 </div>
