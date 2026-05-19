@@ -131,6 +131,10 @@
                         <i class="bi bi-mortarboard me-2"></i> Mahasiswa
                     </a>
 
+                    <a href="/admin/surat" class="nav-link {{ request()->is('admin/surat') ? 'active' : '' }}">
+                        <i class="bi bi-envelope-paper me-2"></i> Surat
+                    </a>
+
                     {{-- Rekap Absensi --}}
                     <a href="/admin/rekap" class="nav-link {{ request()->is('admin/rekap') ? 'active' : '' }}">
                         <i class="bi bi-clipboard-data me-2"></i> Rekap Absensi

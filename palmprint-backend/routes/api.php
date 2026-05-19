@@ -15,6 +15,8 @@ use App\Http\Controllers\Api\Admin\RekapApiController;
 use App\Http\Controllers\Api\Admin\JurusanController;
 use App\Http\Controllers\Api\Admin\ProgramStudiController;
 use App\Http\Controllers\Api\Admin\MahasiswaController;
+use App\Http\Controllers\Api\Mahasiswa\SuratController as MahasiswaSuratController;
+use App\Http\Controllers\Api\Admin\SuratController as AdminSuratController;
 
 // ==================== PUBLIK ====================
 Route::get('jurusans',              [App\Http\Controllers\Api\PublikController::class, 'jurusans']);
@@ -41,8 +43,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Mahasiswa
     Route::prefix('mahasiswa')->group(function () {
-        Route::get('jadwal-hari-ini', [JadwalMahasiswaController::class, 'jadwalHariIni']);
-        Route::post('absensi',         [AbsensiController::class,         'absensi']);
+        Route::get('jadwal-hari-ini',   [JadwalMahasiswaController::class, 'jadwalHariIni']);
+        Route::post('absensi',           [AbsensiController::class,         'absensi']);
+        Route::get('surats',            [MahasiswaSuratController::class,  'index']);
+        Route::post('surats',            [MahasiswaSuratController::class,  'store']);
+        Route::get('riwayat-absensi',   [AbsensiController::class,         'riwayat']); // ← pastikan ini ada
     });
 });
 
@@ -107,6 +112,9 @@ Route::prefix('admin')->group(function () {
     Route::get('rekap/kelas',                [RekapApiController::class, 'kelasByProdi']);
     Route::get('rekap/jadwal/{kelasId}',     [RekapApiController::class, 'jadwalByKelas']);
     Route::get('rekap',                      [RekapApiController::class, 'rekap']);
+
+    Route::get ('surats',             [AdminSuratController::class, 'index']);
+    Route::put ('surats/{id}/review', [AdminSuratController::class, 'review']);
 });
 
 // ==================== DOSEN ====================

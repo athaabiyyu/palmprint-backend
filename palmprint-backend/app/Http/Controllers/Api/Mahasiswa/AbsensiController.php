@@ -129,4 +129,54 @@ class AbsensiController extends Controller
             'threshold'  => round($threshold, 4),
         ], 401);
     }
+
+    // GET /api/mahasiswa/riwayat-absensi
+    public function riwayat(Request $request)
+    {
+        $mahasiswa = $request->user();
+        $kelas     = $mahasiswa->kelas()->first();
+
+        if (!$kelas) {
+            return response()->json(['data' => []]);
+        }
+
+        // Ambil semua sesi dari jadwal kelas mahasiswa semester aktif
+        $sesis = \App\Models\SesiAbsensi::with([
+            'jadwal.mataKuliah',
+            'jadwal.dosen',
+        ])
+            ->whereHas(
+                'jadwal',
+                fn($q) => $q
+                    ->where('kelas_id', $kelas->id)
+                    ->whereHas('semester', fn($q2) => $q2->where('is_active', true))
+            )
+            ->orderByDesc('tanggal')
+            ->get()
+            ->map(function ($sesi) use ($mahasiswa) {
+                $absensi = \App\Models\Absensi::where('sesi_absensi_id', $sesi->id)
+                    ->where('mahasiswa_id', $mahasiswa->id)
+                    ->first();
+
+                $surat = \App\Models\Surat::where('sesi_absensi_id', $sesi->id)
+                    ->where('mahasiswa_id', $mahasiswa->id)
+                    ->first();
+
+                return [
+                    'sesi_id'    => $sesi->id,
+                    'tanggal'    => $sesi->tanggal,
+                    'matkul'     => $sesi->jadwal->mataKuliah->nama,
+                    'dosen'      => $sesi->jadwal->dosen->nama,
+                    'status'     => $absensi ? $absensi->status : 'alpha',
+                    'surat'      => $surat ? [
+                        'id'     => $surat->id,
+                        'jenis'  => $surat->jenis,
+                        'status' => $surat->status,
+                        'catatan_admin' => $surat->catatan_admin,
+                    ] : null,
+                ];
+            });
+
+        return response()->json(['data' => $sesis]);
+    }
 }

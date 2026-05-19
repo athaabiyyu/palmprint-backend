@@ -12,6 +12,7 @@ use App\Http\Controllers\Web\Dosen\DosenDashboardController;
 use App\Http\Controllers\Admin\RekapController;
 use App\Http\Controllers\Admin\JurusanWebController;
 use App\Http\Controllers\Admin\MahasiswaWebController;
+use App\Http\Controllers\Admin\SuratWebController;
 
 Route::get('/', fn() => redirect('/admin/dashboard'));
 
@@ -27,6 +28,7 @@ Route::prefix('admin')->group(function () {
     Route::get('mahasiswa', [MahasiswaWebController::class, 'index']);
     Route::get('rekap/export-excel',  [RekapController::class, 'exportExcel'])->name('rekap.export-excel');
     Route::get('rekap/export-pdf',    [RekapController::class, 'exportPdf'])->name('rekap.export-pdf');
+    Route::get('surat', [SuratWebController::class, 'index']);
 });
 
 Route::prefix('dosen')->group(function () {

@@ -11,11 +11,13 @@ use App\Models\Semester;
 use App\Models\SesiAbsensi;
 use App\Models\Absensi;
 use Carbon\Carbon;
+use App\Models\Surat;
 
 class DashboardController extends Controller
 {
     public function index()
     {
+        $suratPending = Surat::where('status', 'pending')->count();
         $semesterAktif = Semester::where('is_active', true)->first();
         $hariIni       = strtolower(Carbon::now()->locale('id')->dayName);
         $hariMap       = [
@@ -76,6 +78,7 @@ class DashboardController extends Controller
             'belumPalmprint',
             'grafik',
             'hari',
+            'suratPending',
         ));
     }
 }
