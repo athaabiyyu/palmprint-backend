@@ -66,8 +66,19 @@ class AbsensiController extends Controller
         $result = PythonHelper::extractFeatures([$fullPath]);
         if (file_exists($fullPath)) unlink($fullPath);
 
-        if (!$result || $result[0]['status'] !== 'success') {
-            return response()->json(['message' => 'Gagal memproses foto'], 422);
+        // ── SATU blok cek error dengan quality gate support ──
+        if (!$result || !isset($result[0]['status']) || $result[0]['status'] !== 'success') {
+            $message = $result[0]['message'] ?? 'Gagal memproses foto';
+            $type    = $result[0]['type']    ?? 'unknown';
+
+            if ($type === 'quality_gate' && isset($result[0]['details'])) {
+                Log::info('Quality gate failed: ' . json_encode($result[0]['details']));
+            }
+
+            return response()->json([
+                'message' => $message,
+                'type'    => $type,
+            ], 422);
         }
 
         $queryVector = $result[0]['vector'];

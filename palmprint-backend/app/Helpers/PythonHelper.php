@@ -11,36 +11,41 @@ class PythonHelper
         * Return: array vektor HOG-SGF atau null kalau gagal
         */
 
-       
-public static function extractFeatures(array $imagePaths): ?array
-{
-    $pythonPath = 'C:\\Python313\\python.exe';
-    $scriptPath = 'D:\\xampp\\htdocs\\palmprint-backend\\palmprint-ml\\palmprint_api.py';
 
-    // Gabung semua path dengan spasi
-    $pathArgs = implode('" "', $imagePaths);
-    $command  = "{$pythonPath} \"{$scriptPath}\" --images \"{$pathArgs}\" 2>&1";
-    $output   = shell_exec($command);
+       public static function extractFeatures(array $imagePaths): ?array
+       {
+              $pythonPath = 'C:\\Python313\\python.exe';
+              $scriptPath = 'D:\\xampp\\htdocs\\palmprint-backend\\palmprint-ml\\palmprint_api.py';
 
-    Log::info('Python extractFeatures command: ' . $command);
-    Log::info('Python extractFeatures output: ' . $output);
+              $pathArgs = implode('" "', $imagePaths);
+              $command  = "{$pythonPath} \"{$scriptPath}\" --images \"{$pathArgs}\" 2>&1";
+              $output   = shell_exec($command);
 
-    if (!$output) return null;
+              Log::info('Python extractFeatures command: ' . $command);
+              Log::info('Python extractFeatures output: ' . $output);
 
-    // Ambil baris terakhir yang berisi JSON
-    $lines  = array_filter(explode("\n", trim($output)));
-    $last   = end($lines);
-    $result = json_decode($last, true);
+              if (!$output) return null;
 
-    if (!$result || !is_array($result)) return null;
+              // Ambil baris terakhir yang berisi JSON
+              $lines  = array_filter(explode("\n", trim($output)));
+              $last   = trim(end($lines));
+              $result = json_decode($last, true);
 
-    // Cek semua berhasil
-    foreach ($result as $item) {
-        if ($item['status'] !== 'success') return null;
-    }
+              if (!$result) return null;
 
-    return $result;
-}
+              // ── Kalau Python return error tunggal (quality gate, dll) ──
+              // Wrap jadi array agar controller bisa akses $result[0]
+              if (isset($result['status'])) {
+                     return [$result];  // ← wrap object tunggal jadi array
+              }
+
+              // ── Kalau Python return array (registrasi 3 foto) ──
+              if (is_array($result)) {
+                     return $result;
+              }
+
+              return null;
+       }
 
        /**
         * Hitung cosine similarity antara dua vektor
@@ -52,9 +57,9 @@ public static function extractFeatures(array $imagePaths): ?array
               $normB = 0;
 
               foreach ($a as $i => $val) {
-              $dot   += $val * ($b[$i] ?? 0);
-              $normA += $val * $val;
-              $normB += ($b[$i] ?? 0) * ($b[$i] ?? 0);
+                     $dot   += $val * ($b[$i] ?? 0);
+                     $normA += $val * $val;
+                     $normB += ($b[$i] ?? 0) * ($b[$i] ?? 0);
               }
 
               if ($normA == 0 || $normB == 0) return 0.0;

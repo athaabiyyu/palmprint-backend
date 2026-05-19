@@ -250,25 +250,25 @@
             <div class="card-body px-4 pb-4 pt-0" id="prodi-body-${j.id}">
                 ${prodis.length === 0
                     ? `<div class="text-center py-4 text-muted">
-                                <i class="bi bi-inbox d-block fs-3 mb-2"></i>
-                                Belum ada program studi
-                            </div>`
+                                    <i class="bi bi-inbox d-block fs-3 mb-2"></i>
+                                    Belum ada program studi
+                                </div>`
                     : `<table class="table align-middle mb-0" style="margin-top:1px">
-                                <thead>
-                                    <tr style="border-bottom:2px solid #f1f5f9">
-                                        <th style="color:#94a3b8; font-size:0.75rem; font-weight:600;
-                                            text-transform:uppercase; padding:12px 8px; width:50px">No</th>
-                                        <th style="color:#94a3b8; font-size:0.75rem; font-weight:600;
-                                            text-transform:uppercase; padding:12px 8px; width:100px">Kode</th>
-                                        <th style="color:#94a3b8; font-size:0.75rem; font-weight:600;
-                                            text-transform:uppercase; padding:12px 8px">Nama Program Studi</th>
-                                        <th style="color:#94a3b8; font-size:0.75rem; font-weight:600;
-                                            text-transform:uppercase; padding:12px 8px; width:100px">Aksi</th>
-                                    </tr>
-                                </thead>
-                                <tbody>${tableRows}</tbody>
-                            </table>
-                            ${pagination}`
+                                    <thead>
+                                        <tr style="border-bottom:2px solid #f1f5f9">
+                                            <th style="color:#94a3b8; font-size:0.75rem; font-weight:600;
+                                                text-transform:uppercase; padding:12px 8px; width:50px">No</th>
+                                            <th style="color:#94a3b8; font-size:0.75rem; font-weight:600;
+                                                text-transform:uppercase; padding:12px 8px; width:100px">Kode</th>
+                                            <th style="color:#94a3b8; font-size:0.75rem; font-weight:600;
+                                                text-transform:uppercase; padding:12px 8px">Nama Program Studi</th>
+                                            <th style="color:#94a3b8; font-size:0.75rem; font-weight:600;
+                                                text-transform:uppercase; padding:12px 8px; width:100px">Aksi</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>${tableRows}</tbody>
+                                </table>
+                                ${pagination}`
                 }
             </div>
         </div>
