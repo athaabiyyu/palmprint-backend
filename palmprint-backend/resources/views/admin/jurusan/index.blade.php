@@ -1,27 +1,41 @@
 @extends('layouts.admin')
 
+@section('page-title', 'Jurusan & Prodi')
+
 @section('content')
+
+    {{-- Header --}}
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h4 class="fw-bold mb-0">Jurusan & Program Studi</h4>
+        <div>
+            <h5 class="fw-bold mb-0">Jurusan & Program Studi</h5>
+            <small class="text-muted">Kelola struktur organisasi akademik</small>
+        </div>
         <button class="btn btn-primary" onclick="showModalJurusan()">
             <i class="bi bi-plus-lg me-1"></i> Tambah Jurusan
         </button>
     </div>
 
-    <!-- List Jurusan Accordion -->
-    <div class="accordion" id="accordionJurusan">
-        <!-- diisi JS -->
-    </div>
-    <div id="emptyJurusan" class="text-center text-muted py-5" style="display:none">
-        Belum ada jurusan. Tambah jurusan terlebih dahulu.
+    {{-- Loading --}}
+    <div id="loadingState" class="text-center py-5">
+        <div class="spinner-border text-primary"></div>
+        <div class="text-muted mt-2">Memuat data...</div>
     </div>
 
-    <!-- Modal Jurusan -->
+    {{-- Empty --}}
+    <div id="emptyState" class="text-center py-5 d-none">
+        <i class="bi bi-diagram-3 fs-1 text-muted d-block mb-2"></i>
+        <div class="text-muted">Belum ada jurusan. Tambah jurusan terlebih dahulu.</div>
+    </div>
+
+    {{-- Container Jurusan --}}
+    <div id="jurusanContainer"></div>
+
+    {{-- Modal Jurusan --}}
     <div class="modal fade" id="modalJurusan" tabindex="-1">
         <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="modalJurusanTitle">Tambah Jurusan</h5>
+            <div class="modal-content" style="border-radius:16px; border:none">
+                <div class="modal-header border-0 pb-0">
+                    <h5 class="modal-title fw-bold" id="modalJurusanTitle">Tambah Jurusan</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
@@ -37,20 +51,22 @@
                         <input type="text" id="jurusanNama" class="form-control" placeholder="contoh: Teknik">
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
-                    <button type="button" class="btn btn-primary" onclick="simpanJurusan()">Simpan</button>
+                <div class="modal-footer border-0 pt-0">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Batal</button>
+                    <button type="button" class="btn btn-primary" onclick="simpanJurusan()">
+                        <i class="bi bi-check-lg me-1"></i>Simpan
+                    </button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Modal Program Studi -->
+    {{-- Modal Program Studi --}}
     <div class="modal fade" id="modalProdi" tabindex="-1">
         <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="modalProdiTitle">Tambah Program Studi</h5>
+            <div class="modal-content" style="border-radius:16px; border:none">
+                <div class="modal-header border-0 pb-0">
+                    <h5 class="modal-title fw-bold" id="modalProdiTitle">Tambah Program Studi</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
@@ -64,20 +80,26 @@
                         <label class="form-label fw-semibold">Kode</label>
                         <input type="text" id="prodiKode" class="form-control" placeholder="contoh: TI"
                             style="text-transform:uppercase">
-                        <small class="text-muted">Kode ini akan jadi prefix nama kelas. Contoh: TI-4B</small>
+                        <small class="text-muted">
+                            <i class="bi bi-info-circle me-1"></i>
+                            Kode jadi prefix nama kelas — contoh: TI-4B
+                        </small>
                     </div>
                     <div class="mb-3">
                         <label class="form-label fw-semibold">Nama Program Studi</label>
                         <input type="text" id="prodiNama" class="form-control" placeholder="contoh: Teknik Informatika">
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
-                    <button type="button" class="btn btn-primary" onclick="simpanProdi()">Simpan</button>
+                <div class="modal-footer border-0 pt-0">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Batal</button>
+                    <button type="button" class="btn btn-primary" onclick="simpanProdi()">
+                        <i class="bi bi-check-lg me-1"></i>Simpan
+                    </button>
                 </div>
             </div>
         </div>
     </div>
+
 @endsection
 
 @push('scripts')
@@ -85,92 +107,188 @@
         const modalJurusan = new bootstrap.Modal(document.getElementById('modalJurusan'));
         const modalProdi = new bootstrap.Modal(document.getElementById('modalProdi'));
 
+        // Pagination state per jurusan
+        const pageState = {};
+        const PAGE_SIZE = 5;
+
         // ── Load Data ──
         async function loadData() {
+            document.getElementById('loadingState').classList.remove('d-none');
+            document.getElementById('emptyState').classList.add('d-none');
+            document.getElementById('jurusanContainer').innerHTML = '';
+
             const res = await axios.get('/api/admin/jurusans');
             const data = res.data;
-            const accordion = document.getElementById('accordionJurusan');
-            const empty = document.getElementById('emptyJurusan');
+
+            document.getElementById('loadingState').classList.add('d-none');
 
             if (data.length === 0) {
-                accordion.innerHTML = '';
-                empty.style.display = 'block';
+                document.getElementById('emptyState').classList.remove('d-none');
                 return;
             }
 
-            empty.style.display = 'none';
-            accordion.innerHTML = data.map(j => `
-        <div class="accordion-item border-0 shadow-sm mb-3 rounded" id="jurusan-${j.id}">
-            <h2 class="accordion-header">
-                <button class="accordion-button collapsed rounded fw-semibold"
-                    type="button"
-                    data-bs-toggle="collapse"
-                    data-bs-target="#collapse-${j.id}">
-                    <span class="badge bg-primary me-2">${j.kode}</span>
-                    ${j.nama}
-                    <span class="badge bg-secondary ms-2">${j.program_studis.length} Prodi</span>
-                </button>
-            </h2>
-            <div id="collapse-${j.id}" class="accordion-collapse collapse"
-                data-bs-parent="#accordionJurusan">
-                <div class="accordion-body pt-0">
+            // Init page state
+            data.forEach(j => {
+                if (!pageState[j.id]) pageState[j.id] = 1;
+            });
 
-                    <!-- Aksi Jurusan -->
-                    <div class="d-flex justify-content-between align-items-center mb-3">
-                        <small class="text-muted">Daftar Program Studi</small>
-                        <div>
-                            <button class="btn btn-warning btn-sm me-1"
-                                onclick="showModalEditJurusan(${j.id}, '${j.kode}', '${j.nama}')">
-                                <i class="bi bi-pencil me-1"></i>Edit Jurusan
-                            </button>
-                            <button class="btn btn-danger btn-sm me-1"
-                                onclick="hapusJurusan(${j.id})">
-                                <i class="bi bi-trash me-1"></i>Hapus Jurusan
-                            </button>
-                            <button class="btn btn-primary btn-sm"
-                                onclick="showModalTambahProdi(${j.id}, '${j.nama}')">
-                                <i class="bi bi-plus-lg me-1"></i>Tambah Prodi
-                            </button>
-                        </div>
-                    </div>
+            document.getElementById('jurusanContainer').innerHTML = data.map(j => renderJurusan(j)).join('');
+        }
 
-                    <!-- Tabel Prodi -->
-                    ${j.program_studis.length === 0
-                        ? `<p class="text-muted text-center">Belum ada program studi</p>`
-                        : `<table class="table table-hover align-middle mb-0">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th>No</th>
-                                        <th>Kode</th>
-                                        <th>Nama Program Studi</th>
-                                        <th>Aksi</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${j.program_studis.map((p, i) => `
-                                    <tr>
-                                        <td>${i + 1}</td>
-                                        <td><span class="badge bg-success">${p.kode}</span></td>
-                                        <td>${p.nama}</td>
-                                        <td>
-                                            <button class="btn btn-warning btn-sm me-1"
-                                                onclick="showModalEditProdi(${p.id}, ${j.id}, '${j.nama}', '${p.kode}', '${p.nama}')">
-                                                <i class="bi bi-pencil"></i>
-                                            </button>
-                                            <button class="btn btn-danger btn-sm"
-                                                onclick="hapusProdi(${p.id})">
-                                                <i class="bi bi-trash"></i>
-                                            </button>
-                                        </td>
-                                    </tr>
-                                `).join('')}
-                                </tbody>
-                            </table>`
-                    }
+        // ── Render satu card Jurusan ──
+        function renderJurusan(j) {
+            const prodis = j.program_studis ?? [];
+            const page = pageState[j.id] ?? 1;
+            const total = prodis.length;
+            const totalPage = Math.ceil(total / PAGE_SIZE);
+            const start = (page - 1) * PAGE_SIZE;
+            const shown = prodis.slice(start, start + PAGE_SIZE);
+
+            const tableRows = shown.map((p, i) => `
+        <tr>
+            <td style="color:#64748b; font-size:0.85rem">${start + i + 1}</td>
+            <td>
+                <span style="
+                    background:#eff6ff; color:#1d4ed8;
+                    font-size:0.75rem; font-weight:600;
+                    padding:3px 10px; border-radius:20px">
+                    ${p.kode}
+                </span>
+            </td>
+            <td style="font-weight:500">${p.nama}</td>
+            <td>
+                <div class="d-flex gap-1">
+                    <button class="btn btn-sm"
+                        style="background:#fff7ed; color:#d97706; border:none; border-radius:8px; padding:4px 10px"
+                        onclick="showModalEditProdi(${p.id}, ${j.id}, '${j.nama}', '${p.kode}', '${p.nama}')">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <button class="btn btn-sm"
+                        style="background:#fef2f2; color:#dc2626; border:none; border-radius:8px; padding:4px 10px"
+                        onclick="hapusProdi(${p.id})">
+                        <i class="bi bi-trash"></i>
+                    </button>
                 </div>
+            </td>
+        </tr>
+    `).join('');
+
+            const pagination = totalPage > 1 ? `
+        <div class="d-flex justify-content-between align-items-center mt-3 px-1">
+            <small class="text-muted">
+                Menampilkan ${start + 1}–${Math.min(start + PAGE_SIZE, total)} dari ${total} prodi
+            </small>
+            <div class="d-flex gap-1">
+                <button class="btn btn-sm btn-light" ${page <= 1 ? 'disabled' : ''}
+                    onclick="changePage(${j.id}, ${page - 1})">
+                    <i class="bi bi-chevron-left"></i>
+                </button>
+                ${Array.from({length: totalPage}, (_, i) => ` <
+                button class = "btn btn-sm ${i + 1 === page ? 'btn-primary' : 'btn-light'}"
+            onclick = "changePage(${j.id}, ${i + 1})" >
+                $ {
+                    i + 1
+                } <
+                /button>
+            `).join('')}
+                <button class="btn btn-sm btn-light" ${page >= totalPage ? 'disabled' : ''}
+                    onclick="changePage(${j.id}, ${page + 1})">
+                    <i class="bi bi-chevron-right"></i>
+                </button>
             </div>
         </div>
-    `).join('');
+    `: total > 0 ? `
+        <div class="mt-2 px-1">
+            <small class="text-muted">${total} program studi</small>
+        </div>
+    ` : '';
+
+            return `
+        <div class="card border-0 shadow-sm mb-4" style="border-radius:16px; overflow:hidden" id="card-jurusan-${j.id}">
+
+            {{-- Card Header --}}
+            <div class="card-header border-0 py-3 px-4"
+                style="background:#fff">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center gap-3">
+                        <div style="
+                            width:44px; height:44px;
+                            background:#eff6ff;
+                            border-radius:12px;
+                            display:flex; align-items:center; justify-content:center;
+                            font-weight:700; color:#1d4ed8; font-size:0.9rem">
+                            ${j.kode}
+                        </div>
+                        <div>
+                            <div style="font-weight:600; color:#0f172a">${j.nama}</div>
+                            <div style="font-size:0.75rem; color:#94a3b8">
+                                ${prodis.length} Program Studi
+                            </div>
+                        </div>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-sm"
+                            style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; color:#64748b"
+                            onclick="showModalEditJurusan(${j.id}, '${j.kode}', '${j.nama}')">
+                            <i class="bi bi-pencil me-1"></i>Edit
+                        </button>
+                        <button class="btn btn-sm"
+                            style="background:#eff6ff; border:none; border-radius:8px; color:#1d4ed8; font-weight:500"
+                            onclick="showModalTambahProdi(${j.id}, '${j.nama}')">
+                            <i class="bi bi-plus-lg me-1"></i>Tambah Prodi
+                        </button>
+                        <button class="btn btn-sm"
+                            style="background:#fef2f2; border:none; border-radius:8px; color:#dc2626"
+                            onclick="hapusJurusan(${j.id})">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {{-- Card Body --}}
+            <div class="card-body px-4 pb-4 pt-0" id="prodi-body-${j.id}">
+                ${prodis.length === 0
+                    ? `<div class="text-center py-4 text-muted">
+                                <i class="bi bi-inbox d-block fs-3 mb-2"></i>
+                                Belum ada program studi
+                            </div>`
+                    : `<table class="table align-middle mb-0" style="margin-top:1px">
+                                <thead>
+                                    <tr style="border-bottom:2px solid #f1f5f9">
+                                        <th style="color:#94a3b8; font-size:0.75rem; font-weight:600;
+                                            text-transform:uppercase; padding:12px 8px; width:50px">No</th>
+                                        <th style="color:#94a3b8; font-size:0.75rem; font-weight:600;
+                                            text-transform:uppercase; padding:12px 8px; width:100px">Kode</th>
+                                        <th style="color:#94a3b8; font-size:0.75rem; font-weight:600;
+                                            text-transform:uppercase; padding:12px 8px">Nama Program Studi</th>
+                                        <th style="color:#94a3b8; font-size:0.75rem; font-weight:600;
+                                            text-transform:uppercase; padding:12px 8px; width:100px">Aksi</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${tableRows}</tbody>
+                            </table>
+                            ${pagination}`
+                }
+            </div>
+        </div>
+    `;
+        }
+
+        // ── Change Page ──
+        function changePage(jurusanId, page) {
+            pageState[jurusanId] = page;
+
+            // Re-fetch data dan re-render hanya card yang bersangkutan
+            axios.get('/api/admin/jurusans').then(res => {
+                const jurusan = res.data.find(j => j.id === jurusanId);
+                if (!jurusan) return;
+
+                const card = document.getElementById(`card-jurusan-${jurusanId}`);
+                if (card) {
+                    card.outerHTML = renderJurusan(jurusan);
+                }
+            });
         }
 
         // ── Modal Jurusan: Tambah ──
@@ -219,7 +337,7 @@
 
         // ── Hapus Jurusan ──
         async function hapusJurusan(id) {
-            if (!confirm('Yakin hapus jurusan ini? Semua program studi di dalamnya juga akan terhapus!')) return;
+            if (!confirm('Yakin hapus jurusan ini?')) return;
             try {
                 await axios.delete(`/api/admin/jurusans/${id}`);
                 loadData();

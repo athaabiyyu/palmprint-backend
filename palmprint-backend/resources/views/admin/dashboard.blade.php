@@ -1,25 +1,18 @@
 @extends('layouts.admin')
 
+@section('page-title', 'Dashboard')
+
 @section('content')
-
-    {{-- Header --}}
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <div>
-            <h4 class="fw-bold mb-0">Dashboard</h4>
-            <small class="text-muted">
-                {{ ucfirst($hari) }}, {{ \Carbon\Carbon::now()->translatedFormat('d F Y') }}
-            </small>
+    {{-- Notifikasi Surat Pending --}}
+    @if ($suratPending > 0)
+        <div class="alert alert-warning d-flex align-items-center gap-3 mb-4">
+            <i class="bi bi-envelope-exclamation fs-4"></i>
+            <div>
+                Ada <strong>{{ $suratPending }} surat</strong> yang menunggu review.
+                <a href="/admin/surat" class="alert-link ms-1">Review sekarang →</a>
+            </div>
         </div>
-        @if ($semesterAktif)
-            <span class="badge bg-success fs-6">
-                <i class="bi bi-calendar-check me-1"></i>
-                {{ $semesterAktif->nama }}
-            </span>
-        @else
-            <span class="badge bg-warning text-dark fs-6">Tidak ada semester aktif</span>
-        @endif
-    </div>
-
+    @endif
     {{-- Row 1 — Summary Cards --}}
     <div class="row g-3 mb-4">
         <div class="col-md-3">
@@ -82,21 +75,10 @@
                 </div>
             </div>
         </div>
-        {{-- Notifikasi Surat Pending --}}
-        @if ($suratPending > 0)
-            <div class="alert alert-warning d-flex align-items-center gap-3 mb-4">
-                <i class="bi bi-envelope-exclamation fs-4"></i>
-                <div>
-                    Ada <strong>{{ $suratPending }} surat</strong> yang menunggu review.
-                    <a href="/admin/surat" class="alert-link ms-1">Review sekarang →</a>
-                </div>
-            </div>
-        @endif
     </div>
 
     {{-- Row 2 — Jadwal Hari Ini + Sesi Aktif --}}
     <div class="row g-3 mb-4">
-
         {{-- Jadwal Hari Ini --}}
         <div class="col-md-7">
             <div class="card border-0 shadow-sm h-100">
@@ -107,7 +89,7 @@
                         <span class="badge bg-primary ms-1">{{ $jadwalHariIni->count() }}</span>
                     </h6>
                 </div>
-                <div class="card-body">
+                <div class="card-body" style="max-height: 280px; overflow-y: auto;">
                     @if ($jadwalHariIni->isEmpty())
                         <div class="text-center text-muted py-4">
                             <i class="bi bi-calendar-x fs-1"></i>
@@ -164,7 +146,7 @@
                         <span class="badge bg-success ms-1">{{ $sesiAktif->count() }}</span>
                     </h6>
                 </div>
-                <div class="card-body">
+                <div class="card-body" style="max-height: 280px; overflow-y: auto;">
                     @if ($sesiAktif->isEmpty())
                         <div class="text-center text-muted py-4">
                             <i class="bi bi-slash-circle fs-1"></i>
