@@ -57,6 +57,8 @@ PALM_LANDMARK_IDS = [0, 1, 5, 9, 13, 17]
 # Dipakai sebagai ujung sumbu untuk menghitung sudut kemiringan tangan
 _MIDDLE_MCP_IDX = 3
 
+# WAJIB SINKRON dengan Config.ROI_SIZE di notebook dan ROI_SIZE di palmprint_api.py
+# Ubah nilai ini → ubah di kedua file lain juga, dan retrain model.
 ROI_SIZE = 200
 
 
@@ -148,7 +150,7 @@ def _compute_dynamic_roi_size(lm, w, h):
       sehingga tetap tight ke telapak.
     """
     ROI_SIZE_MIN = 80
-    ROI_SIZE_MAX = 250  # turun dari 400
+    ROI_SIZE_MAX = ROI_SIZE  # ikut konstanta global — ubah ROI_SIZE di atas, ini ikut otomatis
 
     wrist_x  = lm[0].x * w
     wrist_y  = lm[0].y * h

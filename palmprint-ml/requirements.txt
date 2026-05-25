@@ -1,0 +1,17 @@
+# requirements.txt
+# Install: pip install -r requirements.txt
+
+# FastAPI & server
+fastapi>=0.100.0
+uvicorn>=0.23.0
+python-multipart>=0.0.6
+
+# ML & image processing (kemungkinan sudah ada dari notebook)
+opencv-python>=4.8.0
+numpy>=1.24.0
+scikit-learn>=1.3.0
+scikit-image>=0.21.0
+joblib>=1.3.0
+
+# MediaPipe (untuk roi_mediapipe.py)
+mediapipe>=0.10.0

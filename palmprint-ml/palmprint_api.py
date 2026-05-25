@@ -6,9 +6,12 @@ Dipanggil oleh Laravel via shell_exec:
 Output: JSON ke stdout
 
 Revisi:
-  - Palm detector: OpenCV (YCrCb + HSV skin + Morphological) — YOLO dihapus
+  - Palm detector: MediaPipe HandLandmarker (Fase 1A + Dynamic ROI)
   - Threshold: nilai optimal dari threshold.pkl (bukan auto-percentile)
-  - PCA: variance otomatis 95% (n_components dari pca.pkl)
+  - PCA: variance otomatis 99% (n_components dari pca.pkl)
+  - Enhancement: Gabor+CLAHE tanpa DoG (konsisten dengan training)
+    DoG tidak cocok untuk dataset kamera khusus — lihat komentar
+    di enhance_gabor() call di process_image() untuk penjelasan lengkap.
 """
 
 import os
@@ -16,7 +19,7 @@ import sys
 import json
 import argparse
 import warnings
-from roi_mediapipe import extract_roi
+from roi_mediapipe import detect_palm_opencv
 
 warnings.filterwarnings("ignore")
 
@@ -316,12 +319,6 @@ def process_image(image_path):
     Kalau quality gate gagal, langsung return error JSON
     tanpa lanjut ke ekstraksi fitur.
     """
-    import cv2
-    import os
-    import sys
-    import joblib
-    from roi_mediapipe import extract_roi, detect_palm_opencv
-
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     MODELS_DIR = os.path.join(BASE_DIR, "models")
 
@@ -365,7 +362,15 @@ def process_image(image_path):
         sys.exit(1)
 
     # ── STEP 4: Enhancement ──
-    enhanced = enhance_gabor(roi, use_dog=True)
+    # use_dog=False (default) — sengaja tidak diaktifkan.
+    # Dataset training diambil dengan kamera khusus: pencahayaan konsisten,
+    # background kain hitam, resolusi tinggi. Pada kondisi ini DoG justru
+    # merusak detail garis palmprint (blur) karena σ=1/σ=10 memotong
+    # frekuensi yang mengandung fitur palmprint halus.
+    # Domain gap kamera HP ditangani oleh: alignment (roi_mediapipe),
+    # dynamic ROI, dan CLAHE — bukan DoG.
+    # Jika pipeline ini diubah, training HARUS diulang agar konsisten.
+    enhanced = enhance_gabor(roi, use_dog=False)
 
     # ── STEP 5: Feature extraction ──
     feat = extract_hog_sgf(enhanced)
