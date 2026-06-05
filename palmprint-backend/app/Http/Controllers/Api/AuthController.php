@@ -2,13 +2,14 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Helpers\PythonHelper;
 use App\Http\Controllers\Controller;
+use App\Models\Kelas;
 use App\Models\Mahasiswa;
 use App\Models\PalmprintTemplate;
-use App\Models\Kelas;
-use App\Helpers\PythonHelper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 
 class AuthController extends Controller
 {
@@ -51,7 +52,9 @@ class AuthController extends Controller
         foreach ($results as $i => $result) {
             if ($result['status'] !== 'success') {
                 return response()->json([
-                    'message' => 'Gagal ekstraksi fitur pada foto ke-' . ($i + 1),
+                    'message' => 'Foto ' . ($i + 1) . ': ' . ($result['message'] ?? 'Gagal memproses foto'),
+                    'type'    => $result['type'] ?? 'unknown',
+                    'foto'    => $i + 1,
                 ], 422);
             }
         }
@@ -65,6 +68,7 @@ class AuthController extends Controller
 
         // Simpan 3 template dengan model_version aktif
         $modelVersion = config('palmprint.model_version');
+        Log::info('model_version: ' . $modelVersion);
         foreach ($results as $i => $result) {
             PalmprintTemplate::create([
                 'mahasiswa_id'   => $mahasiswa->id,
@@ -122,7 +126,9 @@ class AuthController extends Controller
         foreach ($results as $i => $result) {
             if ($result['status'] !== 'success') {
                 return response()->json([
-                    'message' => 'Gagal ekstraksi fitur pada foto ke-' . ($i + 1),
+                    'message' => 'Foto ' . ($i + 1) . ': ' . ($result['message'] ?? 'Gagal memproses foto'),
+                    'type'    => $result['type'] ?? 'unknown',
+                    'foto'    => $i + 1,
                 ], 422);
             }
         }
@@ -195,8 +201,8 @@ class AuthController extends Controller
             'message'           => 'Login berhasil',
             'token'             => $token,
             'sudah_pilih_kelas' => $sudahPilihKelas,
-            'template_valid'    => $templateValid,       
-            'perlu_re_registrasi' => !$templateValid,   
+            'template_valid'    => $templateValid,
+            'perlu_re_registrasi' => !$templateValid,
             'data'              => $mahasiswa,
         ]);
     }

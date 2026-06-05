@@ -51,8 +51,11 @@ class SesiAbsensiController extends Controller
         ]);
 
         // Cek apakah sudah ada sesi aktif untuk jadwal ini hari ini
+        // $sudahAda = SesiAbsensi::where('jadwal_id', $request->jadwal_id)
+        //     ->where('tanggal', Carbon::today())
+        //     ->where('is_active', true)
+        //     ->exists();
         $sudahAda = SesiAbsensi::where('jadwal_id', $request->jadwal_id)
-            ->where('tanggal', Carbon::today())
             ->where('is_active', true)
             ->exists();
 

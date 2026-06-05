@@ -1,14 +1,5 @@
 """
-app/main.py
-===========
 FastAPI entry point untuk palmprint ML service.
-
-Cara jalankan:
-  cd palmprint-ml
-  uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
-
-Port 8001 — internal only, tidak expose ke publik.
-Hanya Laravel yang boleh akses via localhost:8001.
 """
 
 from fastapi import FastAPI, File, UploadFile, HTTPException

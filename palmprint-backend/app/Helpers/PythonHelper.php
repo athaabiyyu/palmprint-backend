@@ -3,67 +3,145 @@
 namespace App\Helpers;
 
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Http;
 
 class PythonHelper
 {
-       /**
-        * Panggil palmprint_api.py dengan path gambar
-        * Return: array vektor HOG-SGF atau null kalau gagal
-        */
+    /**
+     * URL FastAPI service — internal only, tidak expose ke publik.
+     */
+    private static string $FASTAPI_URL = 'http://127.0.0.1:8001';
 
+    /**
+     * Kirim ROI image ke FastAPI untuk ekstraksi fitur.
+     *
+     * Format input:
+     *   $imagePaths = ['/path/foto1.jpg']                              ← absensi (1 foto)
+     *   $imagePaths = ['/path/foto1.jpg', '/path/foto2.jpg', '/path/foto3.jpg'] ← registrasi (3 foto)
+     *
+     * Format output:
+     *   [['status' => 'success', 'vector' => [...], 'threshold' => 0.16, 'dim' => 588]]
+     *   [['status' => 'error', 'message' => '...']]
+     */
+    public static function extractFeatures(array $imagePaths): ?array
+    {
+        $results = [];
 
-       public static function extractFeatures(array $imagePaths): ?array
-       {
-              $pythonPath = 'C:\\Python313\\python.exe';
-              $scriptPath = 'D:\\xampp\\htdocs\\palmprint-backend\\palmprint-ml\\palmprint_api.py';
+        foreach ($imagePaths as $imagePath) {
+            if (!file_exists($imagePath)) {
+                Log::error("[PythonHelper] File tidak ditemukan: {$imagePath}");
+                $results[] = [
+                    'status'  => 'error',
+                    'message' => "File tidak ditemukan: {$imagePath}",
+                ];
+                continue;
+            }
 
-              $pathArgs = implode('" "', $imagePaths);
-              $command  = "{$pythonPath} \"{$scriptPath}\" --images \"{$pathArgs}\" 2>&1";
-              $output   = shell_exec($command);
+            try {
+                $response = Http::timeout(30)
+                    ->attach(
+                        'roi',
+                        file_get_contents($imagePath),
+                        basename($imagePath)
+                    )
+                    ->post(self::$FASTAPI_URL . '/extract');
 
-              Log::info('Python extractFeatures command: ' . $command);
-              Log::info('Python extractFeatures output: ' . $output);
+                Log::info("[PythonHelper] FastAPI response status: " . $response->status());
+                Log::info("[PythonHelper] FastAPI response body: " . $response->body());
 
-              if (!$output) return null;
+                // ── Cek HTTP error (500, 422, dll) ──
+                if ($response->failed()) {
+                    $results[] = [
+                        'status'  => 'error',
+                        'message' => 'FastAPI error: HTTP ' . $response->status(),
+                    ];
+                    continue;
+                }
 
-              // Ambil baris terakhir yang berisi JSON
-              $lines  = array_filter(explode("\n", trim($output)));
-              $last   = trim(end($lines));
-              $result = json_decode($last, true);
+                // ── Parse JSON response ──
+                $data = $response->json();
 
-              if (!$result) return null;
+                if (!$data || !isset($data['status'])) {
+                    $results[] = [
+                        'status'  => 'error',
+                        'message' => 'Response FastAPI tidak valid',
+                    ];
+                    continue;
+                }
 
-              // ── Kalau Python return error tunggal (quality gate, dll) ──
-              // Wrap jadi array agar controller bisa akses $result[0]
-              if (isset($result['status'])) {
-                     return [$result];  // ← wrap object tunggal jadi array
-              }
+                // ── Cek status field ──
+                if ($data['status'] !== 'success') {
+                    $results[] = [
+                        'status'  => 'error',
+                        'message' => $data['message'] ?? 'Gagal memproses foto',
+                        'type'    => $data['type']    ?? 'quality_gate',
+                    ];
+                    continue;
+                }
 
-              // ── Kalau Python return array (registrasi 3 foto) ──
-              if (is_array($result)) {
-                     return $result;
-              }
+                $results[] = $data;
 
-              return null;
-       }
+            } catch (\Illuminate\Http\Client\ConnectionException $e) {
+                Log::error("[PythonHelper] FastAPI tidak bisa diakses: " . $e->getMessage());
+                $results[] = [
+                    'status'  => 'error',
+                    'message' => 'ML service tidak tersedia. Coba beberapa saat lagi.',
+                ];
+            } catch (\Exception $e) {
+                Log::error("[PythonHelper] Error tidak terduga: " . $e->getMessage());
+                $results[] = [
+                    'status'  => 'error',
+                    'message' => 'Terjadi kesalahan: ' . $e->getMessage(),
+                ];
+            }
+        }
 
-       /**
-        * Hitung cosine similarity antara dua vektor
-        */
-       public static function cosineSimilarity(array $a, array $b): float
-       {
-              $dot   = 0;
-              $normA = 0;
-              $normB = 0;
+        if (empty($results)) return null;
 
-              foreach ($a as $i => $val) {
-                     $dot   += $val * ($b[$i] ?? 0);
-                     $normA += $val * $val;
-                     $normB += ($b[$i] ?? 0) * ($b[$i] ?? 0);
-              }
+        return $results;
+    }
 
-              if ($normA == 0 || $normB == 0) return 0.0;
+    /**
+     * Hitung cosine similarity antara dua vektor.
+     *
+     * Digunakan saat absensi untuk membandingkan:
+     *   - query vector (dari foto absensi)
+     *   - template vector (dari database, hasil registrasi)
+     *
+     * Mengembalikan nilai 0.0–1.0, makin tinggi makin mirip.
+     */
+    public static function cosineSimilarity(array $a, array $b): float
+    {
+        if (count($a) !== count($b)) {
+            Log::warning("[PythonHelper] Dimensi vektor tidak sama: " . count($a) . " vs " . count($b));
+            return 0.0;
+        }
 
-              return $dot / (sqrt($normA) * sqrt($normB));
-       }
+        $dot   = 0.0;
+        $normA = 0.0;
+        $normB = 0.0;
+
+        foreach ($a as $i => $val) {
+            $dot   += $val * ($b[$i] ?? 0);
+            $normA += $val * $val;
+            $normB += ($b[$i] ?? 0) * ($b[$i] ?? 0);
+        }
+
+        if ($normA == 0 || $normB == 0) return 0.0;
+
+        return $dot / (sqrt($normA) * sqrt($normB));
+    }
+
+    /**
+     * Cek apakah FastAPI service sedang jalan.
+     */
+    public static function isServiceAvailable(): bool
+    {
+        try {
+            $response = Http::timeout(5)->get(self::$FASTAPI_URL . '/health');
+            return $response->ok();
+        } catch (\Exception $e) {
+            return false;
+        }
+    }
 }

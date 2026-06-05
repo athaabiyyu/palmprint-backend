@@ -1,17 +1,14 @@
 """
 palmprint_api.py
-Dipanggil oleh Laravel via shell_exec:
+Dipanggil oleh Laravel via shell_exec (legacy) atau testing manual:
   python palmprint_api.py --image path/to/foto.jpg
   python palmprint_api.py --images foto1.jpg foto2.jpg foto3.jpg
 Output: JSON ke stdout
 
-Revisi:
-  - Palm detector: MediaPipe HandLandmarker (Fase 1A + Dynamic ROI)
-  - Threshold: nilai optimal dari threshold.pkl (bukan auto-percentile)
-  - PCA: variance otomatis 99% (n_components dari pca.pkl)
-  - Enhancement: Gabor+CLAHE tanpa DoG (konsisten dengan training)
-    DoG tidak cocok untuk dataset kamera khusus — lihat komentar
-    di enhance_gabor() call di process_image() untuk penjelasan lengkap.
+Catatan:
+  - Untuk production, gunakan FastAPI (main.py + extractor.py)
+  - File ini dipertahankan untuk testing manual dan fallback
+  - Parameter HARUS sama persis dengan extractor.py dan notebook
 """
 
 import os
@@ -19,7 +16,6 @@ import sys
 import json
 import argparse
 import warnings
-from roi_mediapipe import detect_palm_opencv
 
 warnings.filterwarnings("ignore")
 
@@ -27,22 +23,23 @@ import cv2
 import numpy as np
 import joblib
 from skimage.feature import hog
+from roi_mediapipe import detect_palm_opencv
 
 # =====================================================================
 # CONFIG — harus sama persis dengan palmprint_modeling.ipynb
 # =====================================================================
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.path.join(BASE_DIR, "models")
 
 # ROI & image size
-ROI_SIZE = 200
+ROI_SIZE   = 200
 IMAGE_SIZE = 64
 
-# HOG — best params dari tuning (orient=6, pixels=16, cells=2, F1=0.8479)
-HOG_ORIENT = 6
-HOG_PIXELS = 16
-HOG_CELLS = 2
+# ✅ HOG — disinkronisasi dengan notebook (orient=9, pixels=8, cells=2)
+HOG_ORIENT = 9    # dari 6
+HOG_PIXELS = 8    # dari 16
+HOG_CELLS  = 2
 
 # SGF — 24 orientasi (0°–345°, step 15°)
 SGF_ANGLES = np.deg2rad(np.arange(0, 360, 15))
@@ -51,206 +48,89 @@ SGF_ANGLES = np.deg2rad(np.arange(0, 360, 15))
 CLAHE_CLIP = 2.0
 CLAHE_TILE = (8, 8)
 
-# Gabor
-GABOR_KSIZE = 21
-GABOR_SIGMA = 4.0
-GABOR_LAMBDA = 10.0
-GABOR_GAMMA = 0.5
+# ✅ Gabor — disinkronisasi dengan notebook (ksize=31, lambda=20)
+GABOR_KSIZE  = 31    # dari 21
+GABOR_SIGMA  = 4.0
+GABOR_LAMBDA = 20.0  # dari 10.0
+GABOR_GAMMA  = 0.5
 GABOR_THETAS = [0, np.pi / 4, np.pi / 2, 3 * np.pi / 4]
 
 # =====================================================================
 # OUTPUT HELPERS
 # =====================================================================
 
-
 def output_success(vector, threshold):
-    print(
-        json.dumps(
-            {
-                "status": "success",
-                "vector": vector,
-                "threshold": threshold,
-                "dim": len(vector),
-            }
-        )
-    )
-
+    print(json.dumps({
+        "status"   : "success",
+        "vector"   : vector,
+        "threshold": threshold,
+        "dim"      : len(vector),
+    }))
 
 def output_error(message):
     print(json.dumps({"status": "error", "message": message}))
 
 
 # =====================================================================
-# STEP 2 — Normalize Illumination Menggunakan DoG
+# STEP 1 — NORMALISASI PENCAHAYAAN (DoG)
 # =====================================================================
-def normalize_illumination(img_gray):
+
+def normalize_illumination(img_gray: np.ndarray) -> np.ndarray:
     """
-    Normalisasi pencahayaan menggunakan DoG (Difference of Gaussians).
-
-    Masalah yang diselesaikan:
-      Foto dari HP punya variasi brightness yang beragam — terang, gelap,
-      ada bayangan di tangan. Gabor filter akan menghasilkan respons berbeda
-      untuk foto yang sama tapi pencahayaannya beda, padahal polanya sama.
-
-    Cara kerja DoG:
-      1. Blur gambar dengan Gaussian kecil (σ=1) → menangkap detail + cahaya
-      2. Blur gambar dengan Gaussian besar (σ=10) → menangkap cahaya global saja
-      3. Selisih keduanya = tekstur murni, bebas dari pencahayaan global
-
-      DoG = G(σ=1) - G(σ=10)
-
-    Kenapa DoG lebih baik dari CLAHE saja:
-      CLAHE meningkatkan kontras lokal tapi tidak menghilangkan variasi
-      pencahayaan global (tangan terang vs gelap tetap beda).
-      DoG benar-benar memisahkan pencahayaan dari tekstur.
-
-    Kenapa σ=1 dan σ=10:
-      σ=1  → tangkap detail halus (lebar blur ~3px, cukup untuk palmprint)
-      σ=10 → tangkap iluminasi global (lebar blur ~30px, smoothing besar)
-      Selisih keduanya = band-pass filter yang menyisakan tekstur skala menengah
-
-    Args:
-        img_gray: grayscale image (np.uint8)
-
-    Returns:
-        normalized (np.uint8): gambar dengan pencahayaan ternormalisasi,
-                               range 0-255, siap masuk Gabor filter
+    Normalisasi pencahayaan dengan Difference of Gaussians (DoG).
+    Memisahkan tekstur dari pencahayaan global.
+    DoG = Gaussian(σ=1) - Gaussian(σ=10)
     """
-    img_f = img_gray.astype(np.float32)
-
-    # Gaussian blur kecil — tangkap detail + sedikit cahaya
+    img_f   = img_gray.astype(np.float32)
     g_small = cv2.GaussianBlur(img_f, (0, 0), sigmaX=1.0)
-
-    # Gaussian blur besar — tangkap pencahayaan global saja
     g_large = cv2.GaussianBlur(img_f, (0, 0), sigmaX=10.0)
-
-    # DoG = selisih → tekstur murni (bisa negatif)
-    dog = g_small - g_large
-
-    # Normalize ke 0-255 untuk input Gabor
-    normalized = cv2.normalize(dog, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-
-    return normalized
+    dog     = g_small - g_large
+    return cv2.normalize(dog, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
 
 # =====================================================================
-# STEP 3 — ENHANCEMENT (Gabor + CLAHE)
+# STEP 2 — ENHANCEMENT (Gabor + CLAHE)
 # =====================================================================
-def enhance_gabor(
-    img_gray, ksize=None, sigma=None, lambd=None, gamma=None, thetas=None, use_dog=False
-):
+
+def enhance_gabor(img_gray: np.ndarray, use_dog: bool = True) -> np.ndarray:
     """
     Gabor filter bank multi-orientasi + CLAHE.
-    Parameter bisa di-override untuk tuning.
+    ✅ use_dog=True secara default — konsisten dengan training.
     """
-
-    ksize = ksize or GABOR_KSIZE
-    sigma = sigma or GABOR_SIGMA
-    lambd = lambd or GABOR_LAMBDA
-    gamma = gamma or GABOR_GAMMA
-    thetas = thetas or GABOR_THETAS
-
-    # Optional DoG
     if use_dog:
         img_gray = normalize_illumination(img_gray)
 
     responses = []
-
-    for theta in thetas:
+    for theta in GABOR_THETAS:
         kernel = cv2.getGaborKernel(
-            ksize=(ksize, ksize),
-            sigma=sigma,
+            ksize=(GABOR_KSIZE, GABOR_KSIZE),
+            sigma=GABOR_SIGMA,
             theta=theta,
-            lambd=lambd,
-            gamma=gamma,
+            lambd=GABOR_LAMBDA,
+            gamma=GABOR_GAMMA,
             psi=0,
             ktype=cv2.CV_32F,
         )
-
         resp = cv2.filter2D(img_gray.astype(np.float32), cv2.CV_32F, kernel)
-
         responses.append(np.abs(resp))
 
     gabor_max = np.max(responses, axis=0)
-
     gabor_max = cv2.normalize(gabor_max, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
     clahe = cv2.createCLAHE(clipLimit=CLAHE_CLIP, tileGridSize=CLAHE_TILE)
-
     return clahe.apply(gabor_max)
-
-
-def check_image_quality(roi_gray):
-    """
-    Cek kualitas ROI sebelum ekstraksi fitur.
-
-    Tiga hal yang dicek:
-      1. Blur score  — Laplacian variance, makin tinggi makin tajam
-      2. Brightness  — rata-rata pixel, terlalu gelap/terang tidak bagus
-      3. Contrast    — standar deviasi pixel, makin tinggi makin detail
-
-    Threshold yang dipakai:
-      blur_min    = 30   → di bawah ini terlalu blur
-      bright_min  = 30   → di bawah ini terlalu gelap
-      bright_max  = 230  → di atas ini terlalu terang (overexposed)
-      contrast_min= 10   → di bawah ini terlalu flat/tidak ada detail
-
-    Args:
-        roi_gray: grayscale ROI hasil detect_palm_opencv() / extract_roi()
-
-    Returns:
-        is_ok  (bool)  : True kalau semua cek lolos
-        reason (str)   : pesan error spesifik kalau gagal, '' kalau OK
-        details (dict) : nilai aktual tiap metrik untuk debugging
-    """
-    # ── Hitung metrik ──
-    lap_var = cv2.Laplacian(roi_gray, cv2.CV_64F).var()
-    mean_bright = float(roi_gray.mean())
-    std_bright = float(roi_gray.std())
-
-    details = {
-        "blur_score": round(lap_var, 1),
-        "brightness": round(mean_bright, 1),
-        "contrast": round(std_bright, 1),
-    }
-
-    # ── Cek blur ──
-    if lap_var < 30:
-        return (
-            False,
-            "Foto terlalu blur. Pastikan kamera fokus dan tangan tidak bergerak.",
-            details,
-        )
-
-    # ── Cek brightness ──
-    if mean_bright < 30:
-        return False, "Foto terlalu gelap. Pindah ke tempat yang lebih terang.", details
-
-    if mean_bright > 230:
-        return False, "Foto terlalu terang. Hindari cahaya langsung ke kamera.", details
-
-    # ── Cek contrast ──
-    if std_bright < 10:
-        return (
-            False,
-            "Detail telapak tangan tidak terlihat. Pastikan telapak menghadap kamera.",
-            details,
-        )
-
-    return True, "", details
 
 
 # =====================================================================
 # STEP 3 — HOG-SGF EXTRACTION
 # =====================================================================
 
-
-def extract_hog_sgf(img_gray):
+def extract_hog_sgf(img_gray: np.ndarray) -> np.ndarray:
     """
-    HOG-SGF sesuai paper (Gumaei et al., Sensors 2018).
-      HOG: best params → orient=6, cell=16×16, block=2×2
-      SGF: 48 dim  (24 sudut × mean + std)
-      Total: HOG dim + 48 + L2-norm
+    HOG-SGF sesuai notebook:
+      HOG : 1764 dim (orient=9, cell=8px, block=2cells)
+      SGF :   48 dim (24 sudut × mean + std)
+      Total: 1812 dim dengan normalisasi 80/20 weighted
     """
     img_64 = cv2.resize(img_gray, (IMAGE_SIZE, IMAGE_SIZE))
 
@@ -266,8 +146,8 @@ def extract_hog_sgf(img_gray):
 
     # ── SGF ──
     img_f = img_64.astype(np.float32)
-    Ix = cv2.Sobel(img_f, cv2.CV_32F, 1, 0, ksize=3)
-    Iy = cv2.Sobel(img_f, cv2.CV_32F, 0, 1, ksize=3)
+    Ix    = cv2.Sobel(img_f, cv2.CV_32F, 1, 0, ksize=3)
+    Iy    = cv2.Sobel(img_f, cv2.CV_32F, 0, 1, ksize=3)
 
     sgf_feats = []
     for theta in SGF_ANGLES:
@@ -277,9 +157,11 @@ def extract_hog_sgf(img_gray):
 
     sgf_feat = np.array(sgf_feats, dtype=np.float32)  # 48 dim
 
-    # ── Gabung + L2 Normalize ──
-    combined = np.concatenate([hog_feat, sgf_feat])
-    norm = np.linalg.norm(combined)
+    # ✅ Normalisasi 80/20 weighted — konsisten dengan notebook
+    hog_norm = hog_feat / (np.linalg.norm(hog_feat) + 1e-8)
+    sgf_norm = sgf_feat / (np.linalg.norm(sgf_feat) + 1e-8)
+    combined = np.concatenate([hog_norm * 0.8, sgf_norm * 0.2])
+    norm     = np.linalg.norm(combined)
     if norm > 0:
         combined = combined / norm
 
@@ -287,18 +169,45 @@ def extract_hog_sgf(img_gray):
 
 
 # =====================================================================
-# STEP 4 — LOAD MODEL
+# STEP 4 — QUALITY GATE
 # =====================================================================
 
+def check_image_quality(roi_gray: np.ndarray) -> tuple:
+    """
+    Cek kualitas ROI sebelum ekstraksi fitur.
+    Dijalankan pada ROI hasil MediaPipe (200×200).
+    """
+    lap_var     = cv2.Laplacian(roi_gray, cv2.CV_64F).var()
+    mean_bright = float(roi_gray.mean())
+    std_bright  = float(roi_gray.std())
+
+    details = {
+        "blur_score": round(lap_var, 1),
+        "brightness": round(mean_bright, 1),
+        "contrast"  : round(std_bright, 1),
+    }
+
+    if lap_var < 30:
+        return False, "Foto terlalu blur. Pastikan kamera fokus dan tangan tidak bergerak.", details
+    if mean_bright < 30:
+        return False, "Foto terlalu gelap. Pindah ke tempat yang lebih terang.", details
+    if mean_bright > 230:
+        return False, "Foto terlalu terang. Hindari cahaya langsung ke kamera.", details
+    if std_bright < 10:
+        return False, "Detail telapak tangan tidak terlihat. Pastikan telapak menghadap kamera.", details
+
+    return True, "", details
+
+
+# =====================================================================
+# STEP 5 — LOAD MODEL
+# =====================================================================
 
 def load_models():
-    """
-    Load scaler.pkl, pca.pkl, threshold.pkl dari folder models/.
-    threshold.pkl berisi nilai optimal dari sweep F1-Score (bukan auto-percentile).
-    """
+    """Load scaler.pkl, pca.pkl, threshold.pkl dari folder models/."""
     try:
-        scaler = joblib.load(os.path.join(MODELS_DIR, "scaler.pkl"))
-        pca = joblib.load(os.path.join(MODELS_DIR, "pca.pkl"))
+        scaler    = joblib.load(os.path.join(MODELS_DIR, "scaler.pkl"))
+        pca       = joblib.load(os.path.join(MODELS_DIR, "pca.pkl"))
         threshold = joblib.load(os.path.join(MODELS_DIR, "threshold.pkl"))
         return scaler, pca, threshold
     except Exception as e:
@@ -310,24 +219,18 @@ def load_models():
 # MAIN PIPELINE
 # =====================================================================
 
-
-def process_image(image_path):
+def process_image(image_path: str) -> tuple:
     """
-    Pipeline lengkap dengan Quality Gate (Fase 3B):
-    foto → ROI → Quality Gate → Gabor+CLAHE → HOG-SGF → Scaler → PCA → vektor
-
-    Kalau quality gate gagal, langsung return error JSON
-    tanpa lanjut ke ekstraksi fitur.
+    Pipeline lengkap:
+    foto → ROI (MediaPipe) → Quality Gate → DoG → Gabor+CLAHE
+         → HOG-SGF → Scaler → PCA → vektor
     """
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    MODELS_DIR = os.path.join(BASE_DIR, "models")
-
     img = cv2.imread(image_path)
     if img is None:
         output_error(f"Gagal membaca gambar: {image_path}")
         sys.exit(1)
 
-    # ── STEP 1: Ekstraksi ROI ──
+    # ── STEP 1: Ekstraksi ROI dengan MediaPipe ──
     roi, dbg = detect_palm_opencv(img)
 
     # ── STEP 2: Cek apakah tangan terdeteksi ──
@@ -338,50 +241,34 @@ def process_image(image_path):
         )
         sys.exit(1)
 
-    # ── STEP 3: Quality Gate ──
-    is_ok, reason, details = check_image_quality(roi)
+    # ── STEP 3: Pastikan ROI 200×200 ──
+    if roi.shape != (ROI_SIZE, ROI_SIZE):
+        roi = cv2.resize(roi, (ROI_SIZE, ROI_SIZE))
 
+    # ── STEP 4: Quality Gate pada ROI ──
+    is_ok, reason, details = check_image_quality(roi)
     if not is_ok:
-        # Simpan debug ROI
         debug_path = os.path.join(BASE_DIR, "debug_roi.jpg")
         cv2.imwrite(debug_path, roi)
-
-        # Return error dengan pesan spesifik
-        import json
-
-        print(
-            json.dumps(
-                {
-                    "status": "error",
-                    "message": reason,
-                    "details": details,  # untuk debugging di Laravel log
-                    "type": "quality_gate",
-                }
-            )
-        )
+        print(json.dumps({
+            "status" : "error",
+            "message": reason,
+            "details": details,
+            "type"   : "quality_gate",
+        }))
         sys.exit(1)
 
-    # ── STEP 4: Enhancement ──
-    # use_dog=False (default) — sengaja tidak diaktifkan.
-    # Dataset training diambil dengan kamera khusus: pencahayaan konsisten,
-    # background kain hitam, resolusi tinggi. Pada kondisi ini DoG justru
-    # merusak detail garis palmprint (blur) karena σ=1/σ=10 memotong
-    # frekuensi yang mengandung fitur palmprint halus.
-    # Domain gap kamera HP ditangani oleh: alignment (roi_mediapipe),
-    # dynamic ROI, dan CLAHE — bukan DoG.
-    # Jika pipeline ini diubah, training HARUS diulang agar konsisten.
-    enhanced = enhance_gabor(roi, use_dog=False)
+    # ── STEP 5: Enhancement dengan DoG ──
+    # ✅ use_dog=True — konsisten dengan training notebook
+    enhanced = enhance_gabor(roi, use_dog=True)
 
-    # ── STEP 5: Feature extraction ──
+    # ── STEP 6: Feature extraction ──
     feat = extract_hog_sgf(enhanced)
 
-    # ── STEP 6: Transform dengan model ──
-    scaler = joblib.load(os.path.join(MODELS_DIR, "scaler.pkl"))
-    pca = joblib.load(os.path.join(MODELS_DIR, "pca.pkl"))
-    threshold = joblib.load(os.path.join(MODELS_DIR, "threshold.pkl"))
-
+    # ── STEP 7: Transform dengan model ──
+    scaler, pca, threshold = load_models()
     feat_scaled = scaler.transform([feat])
-    feat_pca = pca.transform(feat_scaled)
+    feat_pca    = pca.transform(feat_scaled)
 
     # Simpan debug ROI
     debug_path = os.path.join(BASE_DIR, "debug_roi.jpg")
@@ -395,16 +282,10 @@ def process_image(image_path):
 # =====================================================================
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Palmprint feature extraction API")
-    parser.add_argument(
-        "--image", required=False, help="Path ke satu file gambar (mode absensi)"
-    )
-    parser.add_argument(
-        "--images",
-        nargs="+",
-        required=False,
-        help="Path ke beberapa file gambar (mode registrasi)",
-    )
+    parser = argparse.ArgumentParser(description="Palmprint feature extraction")
+    parser.add_argument("--image",  required=False, help="Path ke satu gambar (absensi)")
+    parser.add_argument("--images", nargs="+", required=False,
+                        help="Path ke beberapa gambar (registrasi)")
     args = parser.parse_args()
 
     # ── Mode single image (absensi) ──
@@ -420,23 +301,16 @@ if __name__ == "__main__":
         results = []
         for image_path in args.images:
             if not os.path.exists(image_path):
-                results.append(
-                    {
-                        "status": "error",
-                        "message": f"File tidak ditemukan: {image_path}",
-                    }
-                )
+                results.append({"status": "error", "message": f"File tidak ditemukan: {image_path}"})
                 continue
             try:
                 vector, threshold = process_image(image_path)
-                results.append(
-                    {
-                        "status": "success",
-                        "vector": vector,
-                        "threshold": threshold,
-                        "dim": len(vector),
-                    }
-                )
+                results.append({
+                    "status"   : "success",
+                    "vector"   : vector,
+                    "threshold": threshold,
+                    "dim"      : len(vector),
+                })
             except Exception as e:
                 results.append({"status": "error", "message": str(e)})
         print(json.dumps(results))

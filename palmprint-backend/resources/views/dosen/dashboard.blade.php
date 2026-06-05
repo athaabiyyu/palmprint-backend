@@ -877,17 +877,21 @@
                         </div>
                         ${sesiAktif
                             ? `<button class="btn btn-success btn-sm w-100"
-                                                                        onclick="lihatDetail(${sesiAktif.id})">
-                                                                        <i class="bi bi-eye me-1"></i> Lihat Absensi
-                                                                       </button>`
-                            : isToday
-                                ? `<button class="btn btn-primary btn-sm w-100"
-                                                                            onclick="showModalBuka(${j.id}, '${j.mata_kuliah.nama}', '${j.kelas.nama}')">
-                                                                            <i class="bi bi-unlock me-1"></i> Buka Absensi
+                                                                            onclick="lihatDetail(${sesiAktif.id})">
+                                                                            <i class="bi bi-eye me-1"></i> Lihat Absensi
                                                                            </button>`
-                                : `<button class="btn btn-secondary btn-sm w-100" disabled>
-                                                                            <i class="bi bi-lock me-1"></i> Bukan Hari Ini
-                                                                           </button>`
+                            // : isToday
+                            //     ? `<button class="btn btn-primary btn-sm w-100"
+                                //                                                 onclick="showModalBuka(${j.id}, '${j.mata_kuliah.nama}', '${j.kelas.nama}')">
+                                //                                                 <i class="bi bi-unlock me-1"></i> Buka Absensi
+                                //                                                </button>`
+                            //     : `<button class="btn btn-secondary btn-sm w-100" disabled>
+                                //                                                 <i class="bi bi-lock me-1"></i> Bukan Hari Ini
+                                //                                                </button>`
+                            : `<button class="btn btn-primary btn-sm w-100"
+        onclick="showModalBuka(${j.id}, '${j.mata_kuliah.nama}', '${j.kelas.nama}')">
+        <i class="bi bi-unlock me-1"></i> Buka Absensi
+       </button>`
                         }
                     </div>
                 </div>

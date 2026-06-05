@@ -82,8 +82,7 @@ class AbsensiController extends Controller
         }
 
         $queryVector = $result[0]['vector'];
-        $threshold = config('palmprint.threshold_override')
-            ?? $result[0]['threshold'];
+        $threshold = $result[0]['threshold']; 
         $queryDim    = count($queryVector);
 
         // ── HITUNG COSINE SIMILARITY (MAX dari semua template) ──
