@@ -201,7 +201,7 @@ def check_image_quality(roi_gray: np.ndarray) -> tuple[bool, str, dict]:
         return False, "Foto terlalu gelap. Pindah ke tempat yang lebih terang.", details
     if mean_bright > 230:
         return False, "Foto terlalu terang. Hindari cahaya langsung ke kamera.", details
-    if std_bright < 10:
+    if std_bright < 5:
         return False, "Detail telapak tangan tidak terlihat. Pastikan telapak menghadap kamera.", details
 
     return True, "", details
