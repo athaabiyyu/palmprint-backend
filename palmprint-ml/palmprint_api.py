@@ -187,14 +187,10 @@ def check_image_quality(roi_gray: np.ndarray) -> tuple:
         "contrast"  : round(std_bright, 1),
     }
 
-    if lap_var < 30:
-        return False, "Foto terlalu blur. Pastikan kamera fokus dan tangan tidak bergerak.", details
-    if mean_bright < 30:
-        return False, "Foto terlalu gelap. Pindah ke tempat yang lebih terang.", details
-    if mean_bright > 230:
-        return False, "Foto terlalu terang. Hindari cahaya langsung ke kamera.", details
-    if std_bright < 10:
-        return False, "Detail telapak tangan tidak terlihat. Pastikan telapak menghadap kamera.", details
+    if lap_var    < 5:   return False, "Foto terlalu blur.", details
+    if mean_bright < 20: return False, "Foto terlalu gelap.", details
+    if mean_bright > 245: return False, "Foto terlalu terang.", details
+    if std_bright  < 5:  return False, "Detail telapak tidak terlihat.", details
 
     return True, "", details
 

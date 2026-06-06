@@ -17,6 +17,12 @@ use App\Http\Controllers\Api\Admin\ProgramStudiController;
 use App\Http\Controllers\Api\Admin\MahasiswaController;
 use App\Http\Controllers\Api\Mahasiswa\SuratController as MahasiswaSuratController;
 use App\Http\Controllers\Api\Admin\SuratController as AdminSuratController;
+use App\Http\Controllers\Api\Mahasiswa\PalmprintController;
+
+// routes/api.php — tanpa middleware auth
+Route::post('/validate-palm-guest', [PalmprintController::class, 'validatePalm']);
+Route::post('/validate-palm', [PalmprintController::class, 'validatePalm'])
+     ->middleware('auth:sanctum');
 
 // ==================== PUBLIK ====================
 Route::get('jurusans',              [App\Http\Controllers\Api\PublikController::class, 'jurusans']);
