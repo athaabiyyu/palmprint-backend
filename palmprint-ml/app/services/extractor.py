@@ -16,6 +16,7 @@ import cv2
 import numpy as np
 import joblib
 from skimage.feature import hog
+import datetime
 
 # =====================================================================
 # PATH SETUP
@@ -43,22 +44,18 @@ except ImportError as e:
 ROI_SIZE = 200
 IMAGE_SIZE = 64
 
-# ✅ HOG — disinkronisasi dengan notebook (orient=9, pixels=8, cells=2)
-HOG_ORIENT = 9  # dari 6
-HOG_PIXELS = 8  # dari 16
+HOG_ORIENT = 9
+HOG_PIXELS = 8
 HOG_CELLS = 2
 
-# SGF — 24 orientasi (0°–345°, step 15°)
 SGF_ANGLES = np.deg2rad(np.arange(0, 360, 15))
 
-# CLAHE
 CLAHE_CLIP = 2.0
 CLAHE_TILE = (8, 8)
 
-# ✅ Gabor — disinkronisasi dengan notebook (ksize=31, lambda=20)
-GABOR_KSIZE = 31  # dari 21
+GABOR_KSIZE = 31
 GABOR_SIGMA = 4.0
-GABOR_LAMBDA = 20.0  # dari 10.0
+GABOR_LAMBDA = 20.0
 GABOR_GAMMA = 0.5
 GABOR_THETAS = [0, np.pi / 4, np.pi / 2, 3 * np.pi / 4]
 
@@ -80,20 +77,19 @@ except Exception as e:
     print(f"[extractor] ✗ Gagal load model: {e}")
 
 # =====================================================================
-# STEP 1 — NORMALISASI PENCAHAYAAN (DoG)
+# STEP 1 — NORMALISASI PENCAHAYAAN (DoG + equalizeHist)
 # =====================================================================
 
 
 def normalize_illumination(img_gray: np.ndarray) -> np.ndarray:
     """
-    Normalisasi pencahayaan dengan Difference of Gaussians (DoG).
-    Memisahkan tekstur dari pencahayaan global.
-    DoG = Gaussian(σ=1) - Gaussian(σ=10)
+    DoG murni — SAMA PERSIS dengan palmprint_modeling.ipynb.
+    equalizeHist dihapus karena tidak ada di training pipeline.
     """
-    img_f = img_gray.astype(np.float32)
+    img_f   = img_gray.astype(np.float32)
     g_small = cv2.GaussianBlur(img_f, (0, 0), sigmaX=1.0)
-    g_large = cv2.GaussianBlur(img_f, (0, 0), sigmaX=10.0)
-    dog = g_small - g_large
+    g_large = cv2.GaussianBlur(img_f, (0, 0), sigmaX=15.0)
+    dog     = g_small - g_large
     return cv2.normalize(dog, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
 
@@ -105,9 +101,8 @@ def normalize_illumination(img_gray: np.ndarray) -> np.ndarray:
 def enhance_gabor(img_gray: np.ndarray, use_dog: bool = True) -> np.ndarray:
     """
     Gabor filter bank multi-orientasi + CLAHE.
-    ✅ use_dog=True secara default — konsisten dengan training.
+    use_dog=True secara default — konsisten dengan training.
     """
-    # ✅ DoG sebelum Gabor — konsisten dengan notebook
     if use_dog:
         img_gray = normalize_illumination(img_gray)
 
@@ -141,12 +136,12 @@ def extract_hog_sgf(img_gray: np.ndarray) -> np.ndarray:
     """
     HOG-SGF sesuai notebook:
       HOG : 1764 dim (orient=9, cell=8px, block=2cells)
-      SGF :   48 dim (24 sudut × mean + std)
+      SGF :   48 dim (24 sudut x mean + std)
       Total: 1812 dim dengan normalisasi 80/20 weighted
     """
     img_64 = cv2.resize(img_gray, (IMAGE_SIZE, IMAGE_SIZE))
 
-    # ── HOG ──
+    # HOG
     hog_feat = hog(
         img_64,
         orientations=HOG_ORIENT,
@@ -156,7 +151,7 @@ def extract_hog_sgf(img_gray: np.ndarray) -> np.ndarray:
         visualize=False,
     )
 
-    # ── SGF ──
+    # SGF
     img_f = img_64.astype(np.float32)
     Ix = cv2.Sobel(img_f, cv2.CV_32F, 1, 0, ksize=3)
     Iy = cv2.Sobel(img_f, cv2.CV_32F, 0, 1, ksize=3)
@@ -167,9 +162,9 @@ def extract_hog_sgf(img_gray: np.ndarray) -> np.ndarray:
         sgf_feats.append(np.mean(FR))
         sgf_feats.append(np.std(FR))
 
-    sgf_feat = np.array(sgf_feats, dtype=np.float32)  # 48 dim
+    sgf_feat = np.array(sgf_feats, dtype=np.float32)
 
-    # ✅ Normalisasi 80/20 weighted — konsisten dengan notebook
+    # Normalisasi 80/20 weighted
     hog_norm = hog_feat / (np.linalg.norm(hog_feat) + 1e-8)
     sgf_norm = sgf_feat / (np.linalg.norm(sgf_feat) + 1e-8)
     combined = np.concatenate([hog_norm * 0.8, sgf_norm * 0.2])
@@ -186,10 +181,6 @@ def extract_hog_sgf(img_gray: np.ndarray) -> np.ndarray:
 
 
 def check_image_quality(roi_gray: np.ndarray) -> tuple[bool, str, dict]:
-    """
-    Cek kualitas ROI sebelum ekstraksi fitur.
-    Dijalankan pada ROI hasil MediaPipe (200×200).
-    """
     lap_var = cv2.Laplacian(roi_gray, cv2.CV_64F).var()
     mean_bright = float(roi_gray.mean())
     std_bright = float(roi_gray.std())
@@ -218,64 +209,75 @@ def check_image_quality(roi_gray: np.ndarray) -> tuple[bool, str, dict]:
 
 
 def extract_from_roi(roi_bytes: bytes) -> dict:
-    # ── Cek model tersedia ──
+    """
+    Flutter mengirim full frame JPEG berwarna (max 1080px).
+    Server mengerjakan semua pipeline:
+      1. detect_palm_opencv() — alignment + landmark + dynamic ROI crop
+      2. Quality gate pada ROI
+      3. equalizeHist + DoG + Gabor + CLAHE
+      4. HOG-SGF → Scaler → PCA
+    """
     if _scaler is None or _pca is None or _threshold is None:
         raise ValueError("Model belum di-load. Cek models/ directory.")
 
-    # ── Decode bytes → numpy array ──
+    if not _mediapipe_available:
+        raise RuntimeError(
+            "roi_mediapipe tidak tersedia. "
+            "Pastikan mediapipe ter-install dan hand_landmarker.task ada."
+        )
+
     nparr = np.frombuffer(roi_bytes, np.uint8)
+
+    # ── Decode sebagai BGR (full frame berwarna dari Flutter) ──
     img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    img_gray = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
+    if img_bgr is None:
+        raise RuntimeError("Gagal decode image. Pastikan format valid (JPG/PNG).")
 
-    if img_bgr is None or img_gray is None:
-        raise RuntimeError("Gagal decode ROI image. Pastikan format valid (JPG/PNG).")
+    print(f"[extractor] Input shape: {img_bgr.shape}")
+    
+    debug_orig_filename = f"debug_orig_{datetime.datetime.now().strftime('%H%M%S_%f')}.jpg"
+    debug_orig_path = os.path.join(BASE_DIR, "debug_inputs_ori", debug_orig_filename)
+    os.makedirs(os.path.join(BASE_DIR, "debug_inputs_ori"), exist_ok=True)
+    cv2.imwrite(debug_orig_path, img_bgr)
+    print(f"[Debug] Saved original: {debug_orig_path} | shape={img_bgr.shape}")
 
-    # MediaPipe Hand Detection:
-    if _mediapipe_available:
-        try:
-            roi_mp, dbg = detect_palm_opencv(img_bgr)
-            print(
-                f"[MediaPipe] fallback={dbg['fallback']}, angle={dbg.get('angle', 0):.1f}°"
-            )
+    # ── Pipeline MediaPipe: alignment → landmark → dynamic ROI crop ──
+    img_gray, dbg = detect_palm_opencv(img_bgr)
 
-            # ✅ Selalu raise error kalau tangan tidak terdeteksi
-            if dbg["fallback"]:
-                raise ValueError(
-                    "Tangan tidak terdeteksi. "
-                    "Pastikan telapak tangan terlihat jelas dan menghadap kamera."
-                )
-            roi = roi_mp
+    print(
+        f"[MediaPipe] angle={dbg['angle']:.1f}°  "
+        f"dynamic_size={dbg['dynamic_roi_size']}px  "
+        f"fallback={dbg['fallback']}  "
+        f"area={dbg['area']:.0f}px²"
+    )
 
-        except ValueError:
-            raise  # teruskan ke FastAPI
-        except Exception as e:
-            # Error teknis MediaPipe (bukan gagal detect) → tetap tolak
-            print(f"[MediaPipe] Error teknis: {e}")
-            raise ValueError(
-                "Tangan tidak terdeteksi. "
-                "Pastikan telapak tangan terlihat jelas dan menghadap kamera."
-            )
-    else:
-        # MediaPipe tidak tersedia → tolak semua karena tidak bisa validasi
-        raise ValueError("Hand detection tidak tersedia. Hubungi administrator.")
+    # Tolak jika tangan tidak terdeteksi
+    if dbg["fallback"]:
+        raise ValueError(
+            "Tangan tidak terdeteksi. "
+            "Pastikan telapak tangan terlihat jelas dan menghadap kamera."
+        )
 
-    # ── Pastikan ROI grayscale 200×200 ──
-    if roi.shape != (ROI_SIZE, ROI_SIZE):
-        roi = cv2.resize(roi, (ROI_SIZE, ROI_SIZE))
+    # Simpan debug SEBELUM resize — untuk tahu ukuran asli dynamic ROI
+    debug_filename = f"debug_input_{datetime.datetime.now().strftime('%H%M%S_%f')}.jpg"
+    debug_path = os.path.join(BASE_DIR, "debug_inputs", debug_filename)
+    os.makedirs(os.path.join(BASE_DIR, "debug_inputs"), exist_ok=True)
+    cv2.imwrite(debug_path, img_gray)
+    print(f"[Debug] Saved ROI: {debug_path} | shape={img_gray.shape}")
+    
+    # ── Pastikan ukuran 200×200 ──
+    if img_gray.shape != (ROI_SIZE, ROI_SIZE):
+        img_gray = cv2.resize(img_gray, (ROI_SIZE, ROI_SIZE))
 
-    # ── Quality Gate — pada ROI hasil MediaPipe ──
-    is_ok, reason, details = check_image_quality(roi)
+    # ── Quality Gate ──
+    is_ok, reason, details = check_image_quality(img_gray)
     print(f"[QualityGate] is_ok={is_ok}, details={details}")
     if not is_ok:
         raise ValueError(reason)
 
-    # ✅ Enhancement dengan DoG — konsisten dengan training
-    enhanced = enhance_gabor(roi, use_dog=True)
-
-    # ── Feature Extraction ──
+    # ── Enhancement + Feature Extraction ──
+    enhanced = enhance_gabor(img_gray, use_dog=True)
     feat = extract_hog_sgf(enhanced)
-
-    # ── Transform: Scaler → PCA ──
     feat_scaled = _scaler.transform([feat])
     feat_pca = _pca.transform(feat_scaled)
 
