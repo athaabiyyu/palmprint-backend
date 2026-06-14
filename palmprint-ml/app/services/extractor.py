@@ -28,14 +28,14 @@ MODELS_DIR = os.path.join(BASE_DIR, "models")
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-try:
-    from roi_mediapipe import detect_palm_opencv
+# try:
+#     from roi_mediapipe import detect_palm_opencv
 
-    _mediapipe_available = True
-    print("[extractor] ✓ roi_mediapipe loaded (MediaPipe hand detection aktif)")
-except ImportError as e:
-    _mediapipe_available = False
-    print(f"[extractor] ⚠ roi_mediapipe tidak bisa di-load: {e}")
+#     _mediapipe_available = True
+#     print("[extractor] ✓ roi_mediapipe loaded (MediaPipe hand detection aktif)")
+# except ImportError as e:
+#     _mediapipe_available = False
+#     print(f"[extractor] ⚠ roi_mediapipe tidak bisa di-load: {e}")
 
 # =====================================================================
 # KONFIGURASI — harus sama persis dengan palmprint_modeling.ipynb
@@ -86,10 +86,10 @@ def normalize_illumination(img_gray: np.ndarray) -> np.ndarray:
     DoG murni — SAMA PERSIS dengan palmprint_modeling.ipynb.
     equalizeHist dihapus karena tidak ada di training pipeline.
     """
-    img_f   = img_gray.astype(np.float32)
+    img_f = img_gray.astype(np.float32)
     g_small = cv2.GaussianBlur(img_f, (0, 0), sigmaX=1.0)
     g_large = cv2.GaussianBlur(img_f, (0, 0), sigmaX=15.0)
-    dog     = g_small - g_large
+    dog = g_small - g_large
     return cv2.normalize(dog, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
 
@@ -191,13 +191,13 @@ def check_image_quality(roi_gray: np.ndarray) -> tuple[bool, str, dict]:
         "contrast": round(std_bright, 1),
     }
 
-    if lap_var < 5:
+    if lap_var < 8:
         return False, "Foto terlalu blur.", details
-    if mean_bright < 20:
+    if mean_bright < 30:
         return False, "Foto terlalu gelap.", details
-    if mean_bright > 245:
+    if mean_bright > 235:
         return False, "Foto terlalu terang.", details
-    if std_bright < 5:
+    if std_bright < 6:
         return False, "Detail telapak tidak terlihat.", details
 
     return True, "", details
@@ -210,72 +210,42 @@ def check_image_quality(roi_gray: np.ndarray) -> tuple[bool, str, dict]:
 
 def extract_from_roi(roi_bytes: bytes) -> dict:
     """
-    Flutter mengirim full frame JPEG berwarna (max 1080px).
-    Server mengerjakan semua pipeline:
-      1. detect_palm_opencv() — alignment + landmark + dynamic ROI crop
-      2. Quality gate pada ROI
-      3. equalizeHist + DoG + Gabor + CLAHE
-      4. HOG-SGF → Scaler → PCA
+    Menerima grayscale ROI 200×200 langsung dari Flutter.
+    MediaPipe tidak dijalankan di server — crop sudah dilakukan di client.
     """
     if _scaler is None or _pca is None or _threshold is None:
         raise ValueError("Model belum di-load. Cek models/ directory.")
 
-    if not _mediapipe_available:
-        raise RuntimeError(
-            "roi_mediapipe tidak tersedia. "
-            "Pastikan mediapipe ter-install dan hand_landmarker.task ada."
-        )
-
     nparr = np.frombuffer(roi_bytes, np.uint8)
+    img_gray = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
 
-    # ── Decode sebagai BGR (full frame berwarna dari Flutter) ──
-    img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if img_bgr is None:
+    if img_gray is None:
         raise RuntimeError("Gagal decode image. Pastikan format valid (JPG/PNG).")
 
-    print(f"[extractor] Input shape: {img_bgr.shape}")
-    
-    debug_orig_filename = f"debug_orig_{datetime.datetime.now().strftime('%H%M%S_%f')}.jpg"
-    debug_orig_path = os.path.join(BASE_DIR, "debug_inputs_ori", debug_orig_filename)
-    os.makedirs(os.path.join(BASE_DIR, "debug_inputs_ori"), exist_ok=True)
-    cv2.imwrite(debug_orig_path, img_bgr)
-    print(f"[Debug] Saved original: {debug_orig_path} | shape={img_bgr.shape}")
+    print(f"[extractor] Input shape: {img_gray.shape}")
 
-    # ── Pipeline MediaPipe: alignment → landmark → dynamic ROI crop ──
-    img_gray, dbg = detect_palm_opencv(img_bgr)
-
-    print(
-        f"[MediaPipe] angle={dbg['angle']:.1f}°  "
-        f"dynamic_size={dbg['dynamic_roi_size']}px  "
-        f"fallback={dbg['fallback']}  "
-        f"area={dbg['area']:.0f}px²"
-    )
-
-    # Tolak jika tangan tidak terdeteksi
-    if dbg["fallback"]:
-        raise ValueError(
-            "Tangan tidak terdeteksi. "
-            "Pastikan telapak tangan terlihat jelas dan menghadap kamera."
-        )
-
-    # Simpan debug SEBELUM resize — untuk tahu ukuran asli dynamic ROI
-    debug_filename = f"debug_input_{datetime.datetime.now().strftime('%H%M%S_%f')}.jpg"
-    debug_path = os.path.join(BASE_DIR, "debug_inputs", debug_filename)
-    os.makedirs(os.path.join(BASE_DIR, "debug_inputs"), exist_ok=True)
-    cv2.imwrite(debug_path, img_gray)
-    print(f"[Debug] Saved ROI: {debug_path} | shape={img_gray.shape}")
-    
-    # ── Pastikan ukuran 200×200 ──
+    # Pastikan 200×200
     if img_gray.shape != (ROI_SIZE, ROI_SIZE):
         img_gray = cv2.resize(img_gray, (ROI_SIZE, ROI_SIZE))
 
-    # ── Quality Gate ──
+    # ── DEBUG: simpan ROI yang diterima dari Flutter ──
+    debug_dir = os.path.join(BASE_DIR, "debug_inputs")
+    os.makedirs(debug_dir, exist_ok=True)
+    debug_filename = f"debug_roi_{datetime.datetime.now().strftime('%H%M%S_%f')}.jpg"
+    debug_path = os.path.join(debug_dir, debug_filename)
+    cv2.imwrite(debug_path, img_gray)
+    print(
+        f"[Debug] Saved ROI: {debug_path} | shape={img_gray.shape} | mean={img_gray.mean():.1f} | std={img_gray.std():.1f}"
+    )
+    # ── END DEBUG ──
+
+    # Quality gate
     is_ok, reason, details = check_image_quality(img_gray)
     print(f"[QualityGate] is_ok={is_ok}, details={details}")
     if not is_ok:
         raise ValueError(reason)
 
-    # ── Enhancement + Feature Extraction ──
+    # Enhancement + feature extraction
     enhanced = enhance_gabor(img_gray, use_dog=True)
     feat = extract_hog_sgf(enhanced)
     feat_scaled = _scaler.transform([feat])
