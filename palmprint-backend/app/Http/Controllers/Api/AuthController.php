@@ -34,8 +34,8 @@ class AuthController extends Controller
             $fotoPaths[] = $fullPath;
         }
 
-        // Panggil Python untuk 3 foto sekaligus
-        $results = PythonHelper::extractFeatures($fotoPaths);
+        // Panggil FastAPI: 3 foto sekaligus -> 21 vector (1 asli + 6 augmented per foto)
+        $result = PythonHelper::extractFeaturesForRegistration($fotoPaths);
 
         // Hapus semua foto sementara
         foreach ($fotoPaths as $path) {
@@ -43,20 +43,20 @@ class AuthController extends Controller
         }
 
         // Validasi hasil
-        if (!$results || count($results) !== 3) {
+        if ($result['status'] !== 'success') {
             return response()->json([
-                'message' => 'Gagal ekstraksi fitur palmprint',
+                'message' => $result['message'] ?? 'Gagal ekstraksi fitur palmprint',
+                'type'    => $result['type'] ?? 'unknown',
             ], 422);
         }
 
-        foreach ($results as $i => $result) {
-            if ($result['status'] !== 'success') {
-                return response()->json([
-                    'message' => 'Foto ' . ($i + 1) . ': ' . ($result['message'] ?? 'Gagal memproses foto'),
-                    'type'    => $result['type'] ?? 'unknown',
-                    'foto'    => $i + 1,
-                ], 422);
-            }
+        $vectors = $result['vectors'];
+
+        if (count($vectors) === 0) {
+            Log::error('[AuthController] Registrasi gagal: 0 vector dihasilkan');
+            return response()->json([
+                'message' => 'Gagal memproses template palmprint (tidak ada vector dihasilkan)',
+            ], 422);
         }
 
         // Simpan mahasiswa
@@ -66,14 +66,15 @@ class AuthController extends Controller
             'password' => Hash::make($request->password),
         ]);
 
-        // Simpan 3 template dengan model_version aktif
+        // Simpan SEMUA vector (21x) dengan model_version aktif
         $modelVersion = config('palmprint.model_version');
-        Log::info('model_version: ' . $modelVersion);
-        foreach ($results as $i => $result) {
+        Log::info('[AuthController] Registrasi ' . $mahasiswa->nim . ' - model_version: ' . $modelVersion . ', total_vectors: ' . count($vectors));
+
+        foreach ($vectors as $i => $vector) {
             PalmprintTemplate::create([
                 'mahasiswa_id'   => $mahasiswa->id,
-                'feature_vector' => json_encode($result['vector']),
-                'sample_index'   => $i + 1,
+                'feature_vector' => json_encode($vector),
+                'sample_index'   => $i + 1, // 1..21
                 'model_version'  => $modelVersion,
             ]);
         }
@@ -110,45 +111,48 @@ class AuthController extends Controller
             $fotoPaths[] = $fullPath;
         }
 
-        // Ekstraksi fitur
-        $results = PythonHelper::extractFeatures($fotoPaths);
+        // Ekstraksi fitur: 3 foto -> 21 vector
+        $result = PythonHelper::extractFeaturesForRegistration($fotoPaths);
 
         foreach ($fotoPaths as $path) {
             if (file_exists($path)) unlink($path);
         }
 
-        if (!$results || count($results) !== 3) {
+        if ($result['status'] !== 'success') {
             return response()->json([
-                'message' => 'Gagal ekstraksi fitur palmprint',
+                'message' => $result['message'] ?? 'Gagal ekstraksi fitur palmprint',
+                'type'    => $result['type'] ?? 'unknown',
             ], 422);
         }
 
-        foreach ($results as $i => $result) {
-            if ($result['status'] !== 'success') {
-                return response()->json([
-                    'message' => 'Foto ' . ($i + 1) . ': ' . ($result['message'] ?? 'Gagal memproses foto'),
-                    'type'    => $result['type'] ?? 'unknown',
-                    'foto'    => $i + 1,
-                ], 422);
-            }
+        $vectors = $result['vectors'];
+
+        if (count($vectors) === 0) {
+            Log::error('[AuthController] Re-registrasi gagal: 0 vector untuk mahasiswa_id ' . $mahasiswa->id);
+            return response()->json([
+                'message' => 'Gagal memproses template palmprint',
+            ], 422);
         }
 
-        // Hapus template lama (semua versi)
+        // Hapus template lama (semua versi) - baru hapus SETELAH ekstraksi baru sukses,
+        // supaya kalau FastAPI gagal, template lama user tidak ikut hilang.
         PalmprintTemplate::where('mahasiswa_id', $mahasiswa->id)->delete();
 
-        // Simpan template baru dengan versi terbaru
-        foreach ($results as $i => $result) {
+        Log::info('[AuthController] Re-registrasi ' . $mahasiswa->nim . ' - model_version: ' . $modelVersion . ', total_vectors: ' . count($vectors));
+
+        foreach ($vectors as $i => $vector) {
             PalmprintTemplate::create([
                 'mahasiswa_id'   => $mahasiswa->id,
-                'feature_vector' => json_encode($result['vector']),
+                'feature_vector' => json_encode($vector),
                 'sample_index'   => $i + 1,
                 'model_version'  => $modelVersion,
             ]);
         }
 
         return response()->json([
-            'message'       => 'Template palmprint berhasil diperbarui',
-            'model_version' => $modelVersion,
+            'message'        => 'Template palmprint berhasil diperbarui',
+            'model_version'  => $modelVersion,
+            'total_template' => count($vectors),
         ]);
     }
 
@@ -198,12 +202,12 @@ class AuthController extends Controller
         $token = $mahasiswa->createToken('auth_token')->plainTextToken;
 
         return response()->json([
-            'message'           => 'Login berhasil',
-            'token'             => $token,
-            'sudah_pilih_kelas' => $sudahPilihKelas,
-            'template_valid'    => $templateValid,
+            'message'             => 'Login berhasil',
+            'token'               => $token,
+            'sudah_pilih_kelas'   => $sudahPilihKelas,
+            'template_valid'      => $templateValid,
             'perlu_re_registrasi' => !$templateValid,
-            'data'              => $mahasiswa,
+            'data'                => $mahasiswa,
         ]);
     }
 

@@ -44,7 +44,7 @@ class AbsensiController extends Controller
             return response()->json(['message' => 'Anda sudah melakukan absensi'], 422);
         }
 
-        // ── CEK TEMPLATE VALID DULU (sebelum proses foto) ──
+        // CEK TEMPLATE VALID DULU (sebelum proses foto)
         $modelVersion = config('palmprint.model_version');
         $templates    = PalmprintTemplate::where('mahasiswa_id', $mahasiswa->id)
             ->where('model_version', $modelVersion)
@@ -57,22 +57,22 @@ class AbsensiController extends Controller
             ], 422);
         }
 
-        // ── SIMPAN FOTO SEMENTARA ──
+        // SIMPAN FOTO SEMENTARA
         $fileName = uniqid() . '.' . $request->file('foto')->getClientOriginalExtension();
         $fullPath = storage_path('app/temp/' . $fileName);
         $request->file('foto')->move(storage_path('app/temp'), $fileName);
 
-        // ── EKSTRAKSI FITUR ──
-        $result = PythonHelper::extractFeatures([$fullPath]);
+        // EKSTRAKSI FITUR (mode absensi: 1 foto -> 1 vector)
+        $result = PythonHelper::extractFeature($fullPath);
         if (file_exists($fullPath)) unlink($fullPath);
 
-        // ── SATU blok cek error dengan quality gate support ──
-        if (!$result || !isset($result[0]['status']) || $result[0]['status'] !== 'success') {
-            $message = $result[0]['message'] ?? 'Gagal memproses foto';
-            $type    = $result[0]['type']    ?? 'unknown';
+        // SATU blok cek error dengan quality gate support
+        if (!isset($result['status']) || $result['status'] !== 'success') {
+            $message = $result['message'] ?? 'Gagal memproses foto';
+            $type    = $result['type']    ?? 'unknown';
 
-            if ($type === 'quality_gate' && isset($result[0]['details'])) {
-                Log::info('Quality gate failed: ' . json_encode($result[0]['details']));
+            if ($type === 'quality_gate' && isset($result['details'])) {
+                Log::info('Quality gate failed: ' . json_encode($result['details']));
             }
 
             return response()->json([
@@ -81,19 +81,18 @@ class AbsensiController extends Controller
             ], 422);
         }
 
-        $queryVector = $result[0]['vector'];
-        $threshold = $result[0]['threshold']; 
+        $queryVector = $result['vector'];
+        $threshold   = $result['threshold'];
         $queryDim    = count($queryVector);
 
-        // ── HITUNG COSINE SIMILARITY (MAX dari semua template) ──
-        $bestScore    = 0;
+        // HITUNG COSINE SIMILARITY (MAX dari semua template, 21x per user)
+        $bestScore    = -1.0;
         $bestTemplate = null;
 
         foreach ($templates as $template) {
             $storedVector = json_decode($template->feature_vector, true);
             $storedDim    = count($storedVector);
 
-            // Validasi dimensi — harus sama
             if ($queryDim !== $storedDim) {
                 Log::warning("Dimensi tidak cocok: query={$queryDim}, template={$storedDim}, template_id={$template->id}");
                 continue;
@@ -106,17 +105,15 @@ class AbsensiController extends Controller
             }
         }
 
-        // ── DEBUG LOG ──
-        Log::info('=== DEBUG ABSENSI ===');
-        Log::info('Mahasiswa ID   : ' . $mahasiswa->id);
-        Log::info('Model version  : ' . $modelVersion);
-        Log::info('Query dim      : ' . $queryDim);
-        Log::info('Threshold      : ' . $threshold);
-        Log::info('Best score     : ' . $bestScore);
-        Log::info('Jumlah tmpl    : ' . $templates->count());
-        Log::info('Template dims  : ' . $templates->map(fn($t) => count(json_decode($t->feature_vector, true)))->join(', '));
+        Log::info('==================================================');
+        Log::info('[DEBUG BIOMETRIK] Verifikasi absensi');
+        Log::info('User Akun (mahasiswa_id) : ' . $mahasiswa->id);
+        Log::info('Threshold model (.pkl)   : ' . $threshold);
+        Log::info('Best score               : ' . $bestScore);
+        Log::info('Jumlah template terdaftar: ' . $templates->count());
+        Log::info('==================================================');
 
-        // ── MATCHING ──
+        // MATCHING
         if ($bestScore >= $threshold) {
             Absensi::create([
                 'sesi_absensi_id'  => $sesi->id,
@@ -151,7 +148,6 @@ class AbsensiController extends Controller
             return response()->json(['data' => []]);
         }
 
-        // Ambil semua sesi dari jadwal kelas mahasiswa semester aktif
         $sesis = \App\Models\SesiAbsensi::with([
             'jadwal.mataKuliah',
             'jadwal.dosen',
