@@ -5,34 +5,47 @@ import cv2
 import mediapipe as mp
 import numpy as np
 from mediapipe.tasks import python as mp_python
-from mediapipe.tasks.python import vision as mp_vision
 from mediapipe.tasks.python.vision import HandLandmarker, HandLandmarkerOptions
-from mediapipe.tasks.python.vision.core.vision_task_running_mode import (
-    VisionTaskRunningMode,
-)
+from mediapipe.tasks.python.vision.core.vision_task_running_mode import VisionTaskRunningMode
 
 # =============================================================================
-# KONSTANTA & INISIALISASI MODEL
+# KONSTANTA
 # =============================================================================
 
-ROI_SIZE = 200
-PALM_LANDMARK_IDS = [0, 1, 5, 9, 13, 17]
-ALIGN_ANGLE_MAX = 5.0
-ROI_SIZE_MIN = 80
+ROI_SIZE = 128  # diperkecil dari 200 → 128
 
-_MODEL_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "hand_landmarker.task"
-)
-_MODEL_URL = (
+# Offset quad (× mcp_len), diukur dari baris MCP (P5–P17)
+# Tidak ada alignment → quad langsung mengikuti orientasi tangan
+#
+#   unit_h : arah horizontal sepanjang baris MCP (P17 → P5)
+#   unit_v : tegak lurus ke bawah (arah wrist), 90° dari unit_h
+#
+#  [P17] ──── MCP line ──── [P5]
+#    TL ─────────────────── TR   ← OFFSET_TOP di atas baris MCP (ke arah jari)
+#    │                       │
+#    │       [ROI AREA]      │
+#    │                       │
+#    BL ─────────────────── BR   ← OFFSET_BOTTOM di bawah baris MCP (ke arah wrist)
+OFFSET_TOP    = 0.05   # tepat di garis biru MCP
+OFFSET_BOTTOM = 0.85  # coba kurangi sedikit
+OFFSET_LEFT   = 0.00   # hapus margin kiri
+OFFSET_RIGHT  = 0.05   # geser sedikit ke kanan
+WIDTH_SCALE   = 0.85
+
+# =============================================================================
+# INISIALISASI MODEL
+# =============================================================================
+
+_MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hand_landmarker.task")
+_MODEL_URL  = (
     "https://storage.googleapis.com/mediapipe-models/"
     "hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
 )
 
 
 def _ensure_model():
-    """Download model MediaPipe jika belum ada (±9 MB, sekali saja)."""
     if not os.path.exists(_MODEL_PATH):
-        print(f"[roi_mediapipe] Downloading hand_landmarker.task (~9 MB)...")
+        print("[roi_mediapipe] Downloading hand_landmarker.task (~9 MB)...")
         urllib.request.urlretrieve(_MODEL_URL, _MODEL_PATH)
         print(f"[roi_mediapipe] Model tersimpan: {_MODEL_PATH}")
 
@@ -43,243 +56,299 @@ _options = HandLandmarkerOptions(
     base_options=mp_python.BaseOptions(model_asset_path=_MODEL_PATH),
     running_mode=VisionTaskRunningMode.IMAGE,
     num_hands=1,
-    min_hand_detection_confidence=0.6,
-    min_hand_presence_confidence=0.6,
-    min_tracking_confidence=0.6,
+    min_hand_detection_confidence=0.5,
+    min_hand_presence_confidence=0.5,
+    min_tracking_confidence=0.5,
 )
 _landmarker = HandLandmarker.create_from_options(_options)
 
 
 # =============================================================================
-# HELPER INTERNAL
+# DETEKSI MEDIAPIPE
 # =============================================================================
-
 
 def _detect(img_bgr: np.ndarray):
     """
-    Safe Standard Detector: Konversi tipe data aman tanpa manipulasi kontras ekstrim
-    yang bisa merusak deteksi bawaan MediaPipe pada file .tiff.
+    Deteksi landmark tangan.
+    Jika gagal, retry dengan flip horizontal (workaround MediaPipe handedness).
     """
-    # 1. Jika input bertipe float atau 16-bit (sering terjadi pada .tiff), normalisasi ke 8-bit
     if img_bgr.dtype != np.uint8:
         img_8bit = cv2.normalize(img_bgr, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
     else:
         img_8bit = img_bgr.copy()
-
-    # 2. Pastikan gambar memiliki 3 channel (BGR)
     if len(img_8bit.shape) == 2:
         img_8bit = cv2.cvtColor(img_8bit, cv2.COLOR_GRAY2BGR)
 
-    # 3. Konversi langsung BGR ke RGB standar MediaPipe (Tanpa CLAHE/Enhancement siluman)
-    img_rgb = cv2.cvtColor(img_8bit, cv2.COLOR_BGR2RGB)
+    img_rgb  = cv2.cvtColor(img_8bit, cv2.COLOR_BGR2RGB)
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
-    return _landmarker.detect(mp_image)
-
-def _compute_angle(lm, w: int, h: int) -> float:
-    wrist_x = lm[0].x * w
-    wrist_y = lm[0].y * h
-    mid_x   = lm[9].x * w
-    mid_y   = lm[9].y * h
-
-    if wrist_y <= mid_y:
-        return 0.0
-
-    dx = mid_x - wrist_x
-    dy = mid_y - wrist_y
-    angle = np.degrees(np.arctan2(dx, -dy))
-    return float(np.clip(angle, -ALIGN_ANGLE_MAX, ALIGN_ANGLE_MAX))
-
-
-def _rotate_image(img_bgr: np.ndarray, angle: float) -> np.ndarray:
-    """Rotasi gambar dengan mempertahankan ukuran asli (w, h) sebagai pusat."""
-    h, w = img_bgr.shape[:2]
-    M = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
-    rotated = cv2.warpAffine(
-        img_bgr,
-        M,
-        (w, h),
-        flags=cv2.INTER_LINEAR,
-        borderMode=cv2.BORDER_REPLICATE,
-    )
-    return rotated
-
-
-def _compute_dynamic_roi_size(lm, w: int, h: int) -> int:
-    index_mcp_x, index_mcp_y = lm[5].x * w, lm[5].y * h
-    pinky_mcp_x, pinky_mcp_y = lm[17].x * w, lm[17].y * h
-
-    knuckle_dist = np.sqrt((pinky_mcp_x - index_mcp_x) ** 2 + (pinky_mcp_y - index_mcp_y) ** 2)
-    roi_size = int(np.clip(knuckle_dist * 1.15, ROI_SIZE_MIN, ROI_SIZE))
-    return roi_size
-
-
-def _compute_palm_center(lm, w: int, h: int) -> tuple[int, int]:
-    index_mcp_x, index_mcp_y = lm[5].x * w, lm[5].y * h
-    middle_mcp_x, middle_mcp_y = lm[9].x * w, lm[9].y * h
-    ring_mcp_x, ring_mcp_y = lm[13].x * w, lm[13].y * h
-    pinky_mcp_x, pinky_mcp_y = lm[17].x * w, lm[17].y * h
-    wrist_x, wrist_y = lm[0].x * w, lm[0].y * h
-
-    anchor_x = (index_mcp_x + middle_mcp_x + ring_mcp_x + pinky_mcp_x) / 4.0
-    anchor_y = (index_mcp_y + middle_mcp_y + ring_mcp_y + pinky_mcp_y) / 4.0
-
-    palm_width = np.sqrt((pinky_mcp_x - index_mcp_x) ** 2 + (pinky_mcp_y - index_mcp_y) ** 2)
-
-    vx = pinky_mcp_x - index_mcp_x
-    vy = pinky_mcp_y - index_mcp_y
-
-    len_v = np.sqrt(vx**2 + vy**2)
-    nx = -vy / len_v if len_v > 0 else 0
-    ny = vx / len_v if len_v > 0 else 1
-
-    # Kompas arah menuju wrist (Mendukung Tangan Kanan & Kiri secara otomatis)
-    wx = wrist_x - anchor_x
-    wy = wrist_y - anchor_y
-    dot = nx * wx + ny * wy
-    if dot < 0:
-        nx = -nx
-        ny = -ny
-
-    # Pergeseran emas (0.52) ke tengah area telapak tangan
-    offset = palm_width * 0.52
-    
-    cx = anchor_x + nx * offset
-    cy = anchor_y + ny * offset
-
-    return int(cx), int(cy)
-
-
-def _crop_roi(
-    gray: np.ndarray,
-    cx: int,
-    cy: int,
-    size: int | None = None,
-) -> tuple[np.ndarray, tuple[int, int, int, int]]:
-    h, w = gray.shape[:2]
-    size = size or ROI_SIZE
-    half = size // 2
-
-    x1 = max(cx - half, 0)
-    y1 = max(cy - half, 0)
-    x2 = min(cx + half, w)
-    y2 = min(cy + half, h)
-    roi = gray[y1:y2, x1:x2]
-
-    pad_top = max(0, half - cy)
-    pad_bottom = max(0, (cy + half) - h)
-    pad_left = max(0, half - cx)
-    pad_right = max(0, (cx + half) - w)
-
-    if any([pad_top, pad_bottom, pad_left, pad_right]):
-        roi = cv2.copyMakeBorder(
-            roi,
-            top=pad_top,
-            bottom=pad_bottom,
-            left=pad_left,
-            right=pad_right,
-            borderType=cv2.BORDER_REPLICATE,
-        )
-
-    if size != ROI_SIZE:
-        roi = cv2.resize(roi, (ROI_SIZE, ROI_SIZE), interpolation=cv2.INTER_AREA)
-
-    return roi, (x1, y1, x2, y2)
-
-
-# =============================================================================
-# FUNGSI INTI — SINKRONISASI PETA KOORDINAT AFINE
-# =============================================================================
-
-
-def _get_palm_centroid(img_bgr: np.ndarray):
-    """
-    Pipeline Tunggal: Hitung semua geometri di citra asli, lalu lakukan
-    transformasi matriks affine pada koordinat pasca-rotasi gambar.
-    """
-    h, w = img_bgr.shape[:2]
-    cx, cy = w // 2, h // 2
-    angle = 0.0
-    dynamic_size = ROI_SIZE
-
-    result = _detect(img_bgr)
+    result   = _landmarker.detect(mp_image)
 
     if not result.hand_landmarks:
-        return cx, cy, None, None, img_bgr, angle, dynamic_size, True
+        flipped    = cv2.flip(img_8bit, 1)
+        mp_flipped = mp.Image(image_format=mp.ImageFormat.SRGB,
+                               data=cv2.cvtColor(flipped, cv2.COLOR_BGR2RGB))
+        result_f   = _landmarker.detect(mp_flipped)
+        if result_f.hand_landmarks:
+            lm_orig = result_f.hand_landmarks[0]
+            class _LM:
+                def __init__(self, x, y, z): self.x = x; self.y = y; self.z = z
+            mirrored = [_LM(1.0 - lm.x, lm.y, lm.z) for lm in lm_orig]
+            class _FakeResult:
+                def __init__(self, lms): self.hand_landmarks = [lms]
+            return _FakeResult(mirrored)
 
-    lm = result.hand_landmarks[0]
+    return result
 
-    # 1. Ambil data rotasi & skala dasar dari gambar asli
-    angle = _compute_angle(lm, w, h)
-    dynamic_size = _compute_dynamic_roi_size(lm, w, h)
-    palm_cx, palm_cy = _compute_palm_center(lm, w, h)
 
-    # 2. Eksekusi rotasi gambar
-    img_aligned = _rotate_image(img_bgr, angle)
+# =============================================================================
+# BANGUN QUAD (tanpa alignment)
+# =============================================================================
 
-    # 3. SINKRONISASI MATEMATIS: Putar koordinat pusat mengikuti rotasi matriks gambar
-    M = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
+def _build_quad(lm, w: int, h: int) -> np.ndarray:
+    """
+    Bangun quad langsung dari landmark asli (no rotation).
+
+    Strategi anchor:
+      PRIMARY  : P5  (telunjuk MCP) & P17 (kelingking MCP)
+      FALLBACK : P9  (jari tengah MCP) & P13 (jari manis MCP)
+                 dipakai bila P5/P17 tidak masuk akal (terlalu ke bawah / terlalu dekat)
+
+    Untuk tangan kiri (dataset TJI, jari ke atas):
+      - P5  ada di KIRI  (x lebih kecil)
+      - P17 ada di KANAN (x lebih besar)
+    Bila kebalik (MediaPipe salah handedness) → auto-swap.
+    """
+    p5x,  p5y  = lm[5].x  * w, lm[5].y  * h
+    p17x, p17y = lm[17].x * w, lm[17].y * h
+    p9x,  p9y  = lm[9].x  * w, lm[9].y  * h
+    p13x, p13y = lm[13].x * w, lm[13].y * h
+
+    # ── Tentukan left_pt dan right_pt berdasarkan posisi x ──────────────────
+    # Untuk tangan kiri TJI: anchor kiri = P5 atau P17 yang x-nya lebih kecil
+    if p5x <= p17x:
+        left_pt  = np.array([p5x,  p5y],  dtype=np.float32)
+        right_pt = np.array([p17x, p17y], dtype=np.float32)
+    else:
+        # hand_02, hand_10: P5 dan P17 kebalik dari MediaPipe
+        left_pt  = np.array([p17x, p17y], dtype=np.float32)
+        right_pt = np.array([p5x,  p5y],  dtype=np.float32)
+
+    # ── SANITY CHECK: deteksi landmark terbalik / tidak masuk akal ──────────
+    # Cek rata-rata y semua 4 anchor (P5, P9, P13, P17)
+    all_mcp_y    = (p5y + p9y + p13y + p17y) / 4
+    mcp_center_y = (left_pt[1] + right_pt[1]) / 2
+    mcp_len_check = np.linalg.norm(right_pt - left_pt)
+
+    # Landmark terbalik vertikal (hand_03): semua MCP y > 60% tinggi gambar
+    # Normal ratio: 0.35-0.43 | hand_03 (terbalik): ~0.80
+    landmark_flipped  = all_mcp_y > h * 0.60
+    landmark_abnormal = (
+        mcp_len_check < w * 0.10 or
+        mcp_len_check > w * 0.80
+    )
+
+    if landmark_flipped or landmark_abnormal:
+        # Landmark tidak bisa dipercaya → return None agar caller pakai center crop
+        return None
+
+    # ── FALLBACK ANCHOR: pakai P9/P13 bila P5/P17 terlalu ke bawah ─────────
+    use_p9p13 = mcp_center_y > h * 0.55
+    if use_p9p13:
+        if p9x <= p13x:
+            left_pt  = np.array([p9x,  p9y],  dtype=np.float32)
+            right_pt = np.array([p13x, p13y], dtype=np.float32)
+        else:
+            left_pt  = np.array([p13x, p13y], dtype=np.float32)
+            right_pt = np.array([p9x,  p9y],  dtype=np.float32)
     
-    # Transformasikan titik pusat
-    pt_center = np.array([[[palm_cx, palm_cy]]], dtype=np.float32)
-    cx_rot, cy_rot = cv2.transform(pt_center, M)[0][0]
-    
-    half = dynamic_size // 2
-    cx = int(np.clip(cx_rot, half, w - half))
-    cy = int(np.clip(cy_rot, half, h - half))
+    vec_mcp      = right_pt - left_pt        # vektor dari kiri → kanan
+    mcp_len_orig = np.linalg.norm(vec_mcp)   # panjang asli untuk height
 
-    # Transformasikan juga seluruh landmark untuk keperluan gambar debug di notebook
-    xs = [int(lm[i].x * w) for i in PALM_LANDMARK_IDS]
-    ys = [int(lm[i].y * h) for i in PALM_LANDMARK_IDS]
-    pts = np.array([[xs[i], ys[i]] for i in range(len(xs))], dtype=np.float32).reshape(-1, 1, 2)
-    
-    pts_rotated = cv2.transform(pts, M).squeeze().astype(np.int32)
-    landmarks_rotated = [tuple(p) for p in pts_rotated]
-    hull_rotated = cv2.convexHull(pts_rotated)
+    if mcp_len_orig < 1e-6:
+        pts_all = np.array([[lm[i].x * w, lm[i].y * h] for i in range(21)])
+        xs, ys = pts_all[:, 0], pts_all[:, 1]
+        return np.array([
+            [xs.min(), ys.min()], [xs.max(), ys.min()],
+            [xs.max(), ys.max()], [xs.min(), ys.max()],
+        ], dtype=np.float32)
 
-    return cx, cy, landmarks_rotated, hull_rotated, img_aligned, angle, dynamic_size, False
+    unit_h = vec_mcp / mcp_len_orig
 
+    # Scale down lebar saja, tinggi tetap pakai mcp_len_orig
+    scaled_len = mcp_len_orig * WIDTH_SCALE
+    center_pt  = (left_pt + right_pt) / 2
+    left_pt    = center_pt - unit_h * (scaled_len / 2)
+    right_pt   = center_pt + unit_h * (scaled_len / 2)
+    mcp_len    = scaled_len   # untuk OFFSET_LEFT/RIGHT saja
+
+    unit_v = np.array([unit_h[1], -unit_h[0]], dtype=np.float32)
+
+    p0y = lm[0].y * h
+    mcp_center_y = (left_pt[1] + right_pt[1]) / 2
+    if unit_v[1] < 0 and p0y > mcp_center_y:
+        unit_v = -unit_v
+
+    # mcp_len_orig untuk arah vertikal, mcp_len (scaled) untuk horizontal
+    tl = left_pt  - unit_v * (OFFSET_TOP    * mcp_len_orig) - unit_h * (OFFSET_LEFT  * mcp_len)
+    tr = right_pt - unit_v * (OFFSET_TOP    * mcp_len_orig) + unit_h * (OFFSET_RIGHT * mcp_len)
+    br = right_pt + unit_v * (OFFSET_BOTTOM * mcp_len_orig) + unit_h * (OFFSET_RIGHT * mcp_len)
+    bl = left_pt  + unit_v * (OFFSET_BOTTOM * mcp_len_orig) - unit_h * (OFFSET_LEFT  * mcp_len)
+
+    quad = np.array([tl, tr, br, bl], dtype=np.float32)
+    quad[:, 0] = np.clip(quad[:, 0], 0, w - 1)
+    quad[:, 1] = np.clip(quad[:, 1], 0, h - 1)
+    return quad   # urutan: TL, TR, BR, BL
+
+
+# =============================================================================
+# PERSPECTIVE WARP
+# =============================================================================
+
+def _perspective_warp(img_bgr: np.ndarray, quad: np.ndarray,
+                       out_size: int = ROI_SIZE) -> np.ndarray:
+    dst = np.array([
+        [0,          0         ],
+        [out_size-1, 0         ],
+        [out_size-1, out_size-1],
+        [0,          out_size-1],
+    ], dtype=np.float32)
+    M_p = cv2.getPerspectiveTransform(quad, dst)
+    return cv2.warpPerspective(img_bgr, M_p, (out_size, out_size),
+                               flags=cv2.INTER_LINEAR,
+                               borderMode=cv2.BORDER_REPLICATE)
+
+
+# =============================================================================
+# DEBUG OVERLAY
+# =============================================================================
+
+_HAND_CONNECTIONS = [
+    (0,1),(1,2),(2,3),(3,4),
+    (0,5),(5,6),(6,7),(7,8),
+    (0,9),(9,10),(10,11),(11,12),
+    (0,13),(13,14),(14,15),(15,16),
+    (0,17),(17,18),(18,19),(19,20),
+    (5,9),(9,13),(13,17),
+]
+
+def draw_debug_overlay(img_bgr: np.ndarray, lm, quad: np.ndarray | None,
+                        w: int, h: int, fallback: bool = False) -> np.ndarray:
+    out = img_bgr.copy()
+
+    if fallback or lm is None:
+        cv2.putText(out, "FALLBACK: tangan tidak terdeteksi",
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        return out
+
+    # Skeleton (abu-abu)
+    for a, b in _HAND_CONNECTIONS:
+        pa = (int(lm[a].x * w), int(lm[a].y * h))
+        pb = (int(lm[b].x * w), int(lm[b].y * h))
+        cv2.line(out, pa, pb, (90, 90, 90), 1, cv2.LINE_AA)
+
+    # Semua landmark
+    for i in range(21):
+        pt = (int(lm[i].x * w), int(lm[i].y * h))
+        cv2.circle(out, pt, 2, (200, 200, 200), -1, cv2.LINE_AA)
+
+    # Garis MCP P5–P17 (biru)
+    p5_pt  = (int(lm[5].x  * w), int(lm[5].y  * h))
+    p17_pt = (int(lm[17].x * w), int(lm[17].y * h))
+    cv2.line(out, p17_pt, p5_pt, (255, 120, 0), 2, cv2.LINE_AA)
+
+    # Landmark kunci
+    KEY = [
+        (0,  (0,  50, 255), "P0"),
+        (5,  (0,  220, 20), "P5"),
+        (9,  (0,  200, 200),"P9"),
+        (13, (255,140,  0), "P13"),
+        (17, (180,  0, 220),"P17"),
+    ]
+    for idx, color, lbl in KEY:
+        pt = (int(lm[idx].x * w), int(lm[idx].y * h))
+        cv2.circle(out, pt, 6, color, -1, cv2.LINE_AA)
+        cv2.circle(out, pt, 6, (0, 0, 0), 1)
+        cv2.putText(out, lbl, (pt[0]+5, pt[1]-3),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.30, color, 1, cv2.LINE_AA)
+
+    # Quad (hijau)
+    if quad is not None:
+        qi = quad.astype(np.int32)
+        cv2.polylines(out, [qi], isClosed=True, color=(0, 255, 0), thickness=2)
+        for i, lbl in enumerate(["TL", "TR", "BR", "BL"]):
+            pt = tuple(qi[i])
+            cv2.circle(out, pt, 4, (0, 255, 0), -1)
+            cv2.putText(out, lbl, (pt[0]+3, pt[1]-3),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.28, (0, 255, 0), 1, cv2.LINE_AA)
+
+    cv2.putText(out,
+                f"NO ALIGN | TOP={OFFSET_TOP:.2f} BOT={OFFSET_BOTTOM:.2f} "
+                f"L={OFFSET_LEFT:.2f} R={OFFSET_RIGHT:.2f}",
+                (5, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.33, (0, 255, 255), 1, cv2.LINE_AA)
+    return out
+
+
+# =============================================================================
+# PUBLIC API
+# =============================================================================
 
 def extract_roi(img_bgr: np.ndarray) -> np.ndarray:
-    cx, cy, _, __, img_aligned, _angle, dynamic_size, fallback = _get_palm_centroid(img_bgr)
-    gray = cv2.cvtColor(img_aligned, cv2.COLOR_BGR2GRAY)
-    roi, _ = _crop_roi(gray, cx, cy, size=dynamic_size)
-    return roi
+    """Terima BGR, kembalikan ROI 128×128 grayscale. Raises ValueError jika fallback."""
+    roi_gray, dbg = detect_palm_opencv(img_bgr, debug=False)
+    if dbg["fallback"]:
+        raise ValueError("Tangan tidak terdeteksi oleh MediaPipe.")
+    return roi_gray
 
 
 def detect_palm_opencv(img_bgr: np.ndarray, debug: bool = False):
     """
-    Drop-in replacement yang sudah sinkron antara visualisasi dan koordinat potong.
+    Pipeline ROI extraction palmprint (tanpa alignment).
+
+    Returns:
+        roi_gray : np.ndarray (128, 128) uint8 grayscale
+        dbg      : dict — quad, lm, fallback, debug_overlay (jika debug=True)
     """
-    cx, cy, landmarks, hull, img_aligned, angle, dynamic_size, fallback = (
-        _get_palm_centroid(img_bgr)
-    )
+    h, w   = img_bgr.shape[:2]
+    result = _detect(img_bgr)
 
-    gray = cv2.cvtColor(img_aligned, cv2.COLOR_BGR2GRAY)
-    roi, roi_rect = _crop_roi(gray, cx, cy, size=dynamic_size)
+    if not result.hand_landmarks:
+        # Fallback: crop tengah gambar
+        gray   = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+        half   = ROI_SIZE // 2
+        cx, cy = w // 2, h // 2
+        patch  = gray[max(cy-half, 0):cy+half, max(cx-half, 0):cx+half]
+        dbg = {"quad": None, "lm": None, "fallback": True}
+        if debug:
+            dbg["debug_overlay"] = draw_debug_overlay(img_bgr, None, None, w, h, fallback=True)
+        return cv2.resize(patch, (ROI_SIZE, ROI_SIZE)), dbg
 
-    h, w = img_bgr.shape[:2]
-    mask_vis = np.zeros((h, w), dtype=np.uint8)
-    if hull is not None:
-        cv2.fillConvexPoly(mask_vis, hull, 255)
+    lm = result.hand_landmarks[0]
 
-    dbg = {
-        "mask_raw": mask_vis,
-        "mask_clean": mask_vis.copy(),
-        "fallback": fallback,
-        "contour": hull,
-        "area": float(cv2.contourArea(hull)) if hull is not None else 0.0,
-        "cx": cx,
-        "cy": cy,
-        "roi_rect": roi_rect,
-        "landmarks": landmarks,
-        "angle": angle,
-        "img_aligned": img_aligned,
-        "dynamic_roi_size": dynamic_size,
-    }
+    # Bangun quad langsung dari landmark asli (no rotation)
+    quad = _build_quad(lm, w, h)
 
-    return roi, dbg
+    # Jika landmark tidak bisa dipercaya (terbalik/abnormal) → center crop
+    if quad is None:
+        gray  = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+        half  = ROI_SIZE // 2
+        cx, cy = w // 2, h // 2
+        patch = gray[max(cy-half, 0):cy+half, max(cx-half, 0):cx+half]
+        dbg = {"quad": None, "lm": lm, "fallback": True}
+        if debug:
+            dbg["debug_overlay"] = draw_debug_overlay(
+                img_bgr, lm, None, w, h, fallback=True)
+        return cv2.resize(patch, (ROI_SIZE, ROI_SIZE)), dbg
+
+    # Perspective warp
+    roi_bgr  = _perspective_warp(img_bgr, quad, out_size=ROI_SIZE)
+    roi_gray = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
+
+    dbg = {"quad": quad, "lm": lm, "fallback": False}
+    if debug:
+        dbg["debug_overlay"] = draw_debug_overlay(img_bgr, lm, quad, w, h)
+
+    return roi_gray, dbg
 
 
 if __name__ == "__main__":
-    # Bagian pengetesan file mandiri tetap dipertahankan seperti aslimu...
     pass

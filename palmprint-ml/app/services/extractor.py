@@ -30,8 +30,8 @@ if BASE_DIR not in sys.path:
 # =====================================================================
 # KONFIGURASI — WAJIB SAMA PERSIS DENGAN TRAINING PIPELINE (debug_pipeline_v2.ipynb)
 # =====================================================================
-ROI_SIZE = 200
-IMAGE_SIZE = 160  # Sesuai notebook training
+ROI_SIZE = 128
+IMAGE_SIZE = 128  # Sesuai notebook training
 
 HOG_ORIENT = 12   # Sesuai notebook training
 HOG_PIXELS = 8
@@ -73,16 +73,23 @@ except Exception as e:
 # =====================================================================
 # STEP 1 — NORMALISASI PENCAHAYAAN (DoG)
 # =====================================================================
-def normalize_illumination(img_gray):
+def normalize_illumination(img_gray, sigma_small=1.0, sigma_large=5.0):
     img_f = img_gray.astype(np.float32)
-    g_small = cv2.GaussianBlur(img_f, (0, 0), sigmaX=1.0)
-    g_large = cv2.GaussianBlur(img_f, (0, 0), sigmaX=5.0)
+    
+    # 1. Bikin dua versi blur
+    g_small = cv2.GaussianBlur(img_f, (0, 0), sigmaX=sigma_small)
+    g_large = cv2.GaussianBlur(img_f, (0, 0), sigmaX=sigma_large)
+    
+    # 2. Kurangi untuk menghilangkan bayangan/iluminasi (DoG)
     dog = g_small - g_large
-
-    # Pastikan mean selalu di tengah (polaritas konsisten)
     dog = dog - dog.mean()
-
-    return cv2.normalize(dog, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    
+    # 3. Baris ke-2 Eksperimen: Percentile Clip (1, 99) untuk potong outlier piksel
+    lo, hi = np.percentile(dog, [1, 99])
+    dog_clipped = np.clip(dog, lo, hi)
+    
+    # 4. Normalisasi akhir ke range 0-255 agar kontras maksimal
+    return cv2.normalize(dog_clipped, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
 
 # =====================================================================
@@ -281,17 +288,17 @@ def augment_roi(roi_gray: np.ndarray, n_aug: int = N_AUG_PER_TEMPLATE) -> list:
             _, enc = cv2.imencode('.jpg', aug.astype(np.uint8), [cv2.IMWRITE_JPEG_QUALITY, quality])
             aug = cv2.imdecode(enc, cv2.IMREAD_GRAYSCALE).astype(np.float32)
 
-        # 12. Unsharp masking
-        if np.random.random() < 0.4:
-            blur_for_sharp = cv2.GaussianBlur(aug, (5, 5), 1.0)
-            aug = np.clip(aug + np.random.uniform(0.5, 1.5) * (aug - blur_for_sharp), 0, 255)
+        # # 12. Unsharp masking
+        # if np.random.random() < 0.4:
+        #     blur_for_sharp = cv2.GaussianBlur(aug, (5, 5), 1.0)
+        #     aug = np.clip(aug + np.random.uniform(0.5, 1.5) * (aug - blur_for_sharp), 0, 255)
 
-        # 13. Complex shadow matrix
-        if np.random.random() < 0.4:
-            Y_grid, X_grid = np.meshgrid(np.arange(h), np.arange(w), indexing='ij')
-            shadow_pattern = (X_grid * np.random.uniform(-0.5, 0.5) + Y_grid * np.random.uniform(-0.5, 0.5))
-            shadow_pattern = cv2.normalize(shadow_pattern, None, 0.6, 1.0, cv2.NORM_MINMAX)
-            aug = np.clip(aug * shadow_pattern, 0, 255)
+        # # 13. Complex shadow matrix
+        # if np.random.random() < 0.4:
+        #     Y_grid, X_grid = np.meshgrid(np.arange(h), np.arange(w), indexing='ij')
+        #     shadow_pattern = (X_grid * np.random.uniform(-0.5, 0.5) + Y_grid * np.random.uniform(-0.5, 0.5))
+        #     shadow_pattern = cv2.normalize(shadow_pattern, None, 0.6, 1.0, cv2.NORM_MINMAX)
+        #     aug = np.clip(aug * shadow_pattern, 0, 255)
 
         results.append(aug.astype(np.uint8))
 
@@ -414,6 +421,7 @@ def extract_from_roi_batch_register(roi_bytes_list: list) -> dict:
 
     for idx, roi_bytes in enumerate(roi_bytes_list, start=1):
         img_gray = _decode_and_prepare_roi(roi_bytes)
+        _save_debug_input(img_gray, tag=f"register_foto{idx}")
         
         is_ok, reason, details = check_image_quality(img_gray)
         if not is_ok:
