@@ -1,15 +1,16 @@
 """
 FastAPI entry point untuk palmprint ML service.
 """
-
+from fastapi import Form
+import json
 from typing import List
 
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
 import uvicorn
 import traceback
 
-from app.services.extractor import extract_from_roi, extract_from_roi_batch_register
+from app.services.extractor import extract_from_roi, extract_from_roi_batch_register, identify_from_roi
 
 # =====================================================================
 # INISIALISASI SERVICE
@@ -111,6 +112,46 @@ async def extract_features(roi: List[UploadFile] = File(...)):
             status_code=500,
             detail=f"Kesalahan internal pada ML Service: {str(e)}"
         )
+
+# =====================================================================
+# ENDPOINT 1:N — IDENTIFIKASI LANGSUNG TANPA USER_ID
+# =====================================================================
+@app.post("/identify")
+async def identify_user(
+    roi: UploadFile = File(...),
+    gallery: UploadFile = File(...),  # ← gallery sebagai file JSON
+):
+    print(">>> IDENTIFY CALLED <<<")
+
+    roi_bytes = await roi.read()
+    gallery_bytes = await gallery.read()
+
+    print(f">>> roi size={len(roi_bytes)}, gallery size={len(gallery_bytes)}")
+
+    if roi.content_type not in ALLOWED_CONTENT_TYPES:
+        raise HTTPException(status_code=422, detail=f"Tipe file ditolak: {roi.content_type}")
+
+    if len(roi_bytes) == 0:
+        raise HTTPException(status_code=422, detail="File roi kosong.")
+
+    try:
+        gallery_parsed = json.loads(gallery_bytes.decode('utf-8'))
+        print(f">>> gallery parsed OK, len={len(gallery_parsed)}")
+    except Exception as e:
+        print(f">>> gallery parse ERROR: {e}")
+        raise HTTPException(status_code=400, detail=f"Format gallery tidak valid: {e}")
+
+    if not gallery_parsed:
+        raise HTTPException(status_code=422, detail="Gallery kosong.")
+
+    try:
+        result = identify_from_roi(roi_bytes, gallery_parsed)
+        return JSONResponse(content=result)
+    except ValueError as e:
+        return JSONResponse(status_code=200, content={"status": "error", "message": str(e)})
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

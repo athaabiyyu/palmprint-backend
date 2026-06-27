@@ -1,23 +1,25 @@
 <?php
 
-use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\Admin\SemesterController;
-use App\Http\Controllers\Api\Admin\KelasController;
 use App\Http\Controllers\Api\Admin\DosenController;
-use App\Http\Controllers\Api\Admin\MataKuliahController;
 use App\Http\Controllers\Api\Admin\JadwalController;
-use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\Admin\JurusanController;
+use App\Http\Controllers\Api\Admin\KelasController;
+use App\Http\Controllers\Api\Admin\MahasiswaController;
+use App\Http\Controllers\Api\Admin\MataKuliahController;
+use App\Http\Controllers\Api\Admin\ProgramStudiController;
+use App\Http\Controllers\Api\Admin\RekapApiController;
+use App\Http\Controllers\Api\Admin\SemesterController;
+use App\Http\Controllers\Api\Admin\SuratController as AdminSuratController;
+use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\Dosen\AuthDosenController;
 use App\Http\Controllers\Api\Dosen\SesiAbsensiController;
-use App\Http\Controllers\Api\Mahasiswa\JadwalMahasiswaController;
 use App\Http\Controllers\Api\Mahasiswa\AbsensiController;
-use App\Http\Controllers\Api\Admin\RekapApiController;
-use App\Http\Controllers\Api\Admin\JurusanController;
-use App\Http\Controllers\Api\Admin\ProgramStudiController;
-use App\Http\Controllers\Api\Admin\MahasiswaController;
-use App\Http\Controllers\Api\Mahasiswa\SuratController as MahasiswaSuratController;
-use App\Http\Controllers\Api\Admin\SuratController as AdminSuratController;
+use App\Http\Controllers\Api\Mahasiswa\JadwalMahasiswaController;
 use App\Http\Controllers\Api\Mahasiswa\PalmprintController;
+use App\Http\Controllers\Api\Mahasiswa\SuratController as MahasiswaSuratController;
+use App\Http\Controllers\Api\Tablet\TabletController;
+use Illuminate\Support\Facades\Route;
+
 
 // routes/api.php — tanpa middleware auth
 Route::post('/validate-palm-guest', [PalmprintController::class, 'validatePalm']);
@@ -50,12 +52,15 @@ Route::middleware('auth:sanctum')->group(function () {
     // Mahasiswa
     Route::prefix('mahasiswa')->group(function () {
         Route::get('jadwal-hari-ini',   [JadwalMahasiswaController::class, 'jadwalHariIni']);
-        Route::post('absensi',           [AbsensiController::class,         'absensi']);
+        //Route::post('absensi',           [AbsensiController::class,         'absensi']);
+        
         Route::get('surats',            [MahasiswaSuratController::class,  'index']);
         Route::post('surats',            [MahasiswaSuratController::class,  'store']);
         Route::get('riwayat-absensi',   [AbsensiController::class,         'riwayat']); // ← pastikan ini ada
     });
 });
+Route::post('tablet/absensi', [TabletController::class, 'absensi']);
+Route::get('tablet/sesi-aktif', [TabletController::class, 'sesiAktif']);
 
 // ==================== ADMIN ====================
 Route::prefix('admin')->group(function () {

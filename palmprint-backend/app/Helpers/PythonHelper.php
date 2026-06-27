@@ -168,6 +168,54 @@ class PythonHelper
     }
 
     /**
+     * MODE IDENTIFIKASI 1:N — kirim 1 foto + seluruh gallery,
+     * FastAPI return user_id yang paling cocok.
+     *
+     * Format output sukses:
+     *   ['status' => 'success', 'user_id' => 5, 'score' => 0.82, 'threshold' => 0.274]
+     * Format output unknown:
+     *   ['status' => 'unknown', 'user_id' => null, 'score' => 0.12, 'threshold' => 0.274]
+     * Format output gagal:
+     *   ['status' => 'error', 'message' => '...']
+     */
+    public static function identifyUser(string $imagePath, array $gallery): array
+    {
+        if (!file_exists($imagePath)) {
+            Log::error("[PythonHelper] File tidak ditemukan: {$imagePath}");
+            return ['status' => 'error', 'message' => "File tidak ditemukan: {$imagePath}"];
+        }
+
+        try {
+            $galleryJson = json_encode($gallery);
+            Log::info("[PythonHelper] gallery length=" . strlen($galleryJson));
+
+            $response = Http::timeout(30)
+                ->attach('roi',     file_get_contents($imagePath), basename($imagePath))
+                ->attach('gallery', $galleryJson,                  'gallery.json') // ← file
+                ->post(self::$FASTAPI_URL . '/identify');
+
+            Log::info("[PythonHelper] FastAPI identify status: " . $response->status());
+
+            if ($response->failed()) {
+                return ['status' => 'error', 'message' => 'FastAPI error: HTTP ' . $response->status()];
+            }
+
+            $data = $response->json();
+            if (!$data || !isset($data['status'])) {
+                return ['status' => 'error', 'message' => 'Response FastAPI tidak valid'];
+            }
+
+            return $data;
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            Log::error("[PythonHelper] FastAPI tidak bisa diakses: " . $e->getMessage());
+            return ['status' => 'error', 'message' => 'ML service tidak tersedia.'];
+        } catch (\Exception $e) {
+            Log::error("[PythonHelper] Error: " . $e->getMessage());
+            return ['status' => 'error', 'message' => 'Terjadi kesalahan: ' . $e->getMessage()];
+        }
+    }
+
+    /**
      * Hitung cosine similarity antara dua vektor (PCA Space).
      * SINKRON 100% dengan perhitungan matematis scikit-learn Python.
      */

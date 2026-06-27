@@ -402,6 +402,74 @@ def extract_from_roi(roi_bytes: bytes) -> dict:
         "dim": len(vector),
     }
 
+# =====================================================================
+# MAIN INFERENCE — MODE IDENTIFIKASI 1:N (tambahan untuk 1:N)
+# =====================================================================
+def identify_from_roi(roi_bytes: bytes, gallery: list) -> dict:
+    """
+    Identifikasi 1:N: bandingkan 1 query foto ke SEMUA gallery di database.
+    
+    Args:
+        roi_bytes : bytes foto dari Flutter
+        gallery   : list of dict dari Laravel, format:
+                    [{"user_id": 1, "vectors": [[...], [...], ...]}, ...]
+    
+    Return:
+        {
+          "status": "success" | "unknown",
+          "user_id": int | None,
+          "score": float,
+          "threshold": float
+        }
+    """
+    if _pca is None or _threshold is None:
+        raise ValueError("Model (PCA/Threshold) belum siap di server. Cek folder models/.")
+
+    # Ekstrak fitur query
+    img_gray = _decode_and_prepare_roi(roi_bytes)
+    _save_debug_input(img_gray, tag="identify")
+
+    is_ok, reason, details = check_image_quality(img_gray)
+    if not is_ok:
+        raise ValueError(reason)
+
+    feat = preprocess_and_extract(img_gray)
+    query_vector = np.array(_vector_to_pca(feat))
+
+    # Bandingkan ke semua gallery
+    best_user_id = None
+    best_score   = -1.0
+
+    for entry in gallery:
+        user_id     = entry["user_id"]
+        vectors     = np.array(entry["vectors"])  # shape: (21, n_components)
+
+        # Cosine similarity query vs semua vector user ini, ambil max
+        norms       = np.linalg.norm(vectors, axis=1, keepdims=True)
+        vectors_n   = vectors / np.maximum(norms, 1e-8)
+        query_n     = query_vector / np.maximum(np.linalg.norm(query_vector), 1e-8)
+        sims        = vectors_n @ query_n  # dot product = cosine similarity
+        score       = float(np.max(sims))
+
+        if score > best_score:
+            best_score   = score
+            best_user_id = user_id
+
+    # Cek threshold
+    if best_score >= _threshold:
+        return {
+            "status"    : "success",
+            "user_id"   : best_user_id,
+            "score"     : round(best_score, 6),
+            "threshold" : float(_threshold),
+        }
+    else:
+        return {
+            "status"    : "unknown",
+            "user_id"   : None,
+            "score"     : round(best_score, 6),
+            "threshold" : float(_threshold),
+        }
 
 # =====================================================================
 # MAIN INFERENCE — MODE REGISTRASI (3 foto -> 21 vector)
