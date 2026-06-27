@@ -13,12 +13,12 @@ return new class extends Migration
         Schema::table('palmprint_templates', function (Blueprint $table) {
             // Versi model saat template dibuat
             // Default '1.0' untuk template lama yang sudah ada
-            $table->string('model_version', 10)->default('3.1.8')->after('sample_index');
+            $table->string('model_version', 10)->default('3.1.9')->after('sample_index');
         });
 
         // Set semua template lama ke versi '1.0' (sudah outdated)
         // Mereka perlu re-registrasi dengan model baru
-        DB::table('palmprint_templates')->update(['model_version' => '3.1.8']);
+        DB::table('palmprint_templates')->update(['model_version' => '3.1.9']);
     }
 
     public function down(): void

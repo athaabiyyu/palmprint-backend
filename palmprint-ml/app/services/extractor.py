@@ -2,10 +2,14 @@
 app/services/extractor.py
 =========================
 Inti logika ML untuk ekstraksi fitur palmprint.
-SINKRON 100% dengan debug_pipeline_v2.ipynb:
-  - IMAGE_SIZE=160, HOG_ORIENT=12, Tanpa StandardScaler
-  - Gabor dual-scale (8 theta x 2 scale = 16 kernel), kombinasi 0.4*max + 0.6*mean
+SINKRON 100% dengan training pipeline (Config class):
+  - IMAGE_SIZE=128, HOG_ORIENT=9, HOG_PIXELS=16, HOG_CELLS=2
+  - SGF_ANGLES = 0-180 step 15 (12 sudut), pakai |FR| sebelum mean/std
+  - HOG block_norm='L2-Hys', bobot kombinasi HOG:SGF = 0.85:0.15
+  - Gabor dual-scale (8 theta x 2 scale = 16 kernel): (3.5,12.0) & (2.0,7.0)
+  - Sharpen addWeighted(1.5, gaussian, -0.5)
   - CLAHE clip=1.5, tile=8x8
+  - Tanpa StandardScaler
   - augment_roi (13 jenis gangguan, n_aug=6) untuk skema registrasi 21 vector/user
 """
 
@@ -14,7 +18,7 @@ import sys
 import cv2
 import numpy as np
 import joblib
-from app.target_pca import TargetPCA 
+from app.target_pca import TargetPCA
 from skimage.feature import hog
 import datetime
 
@@ -28,18 +32,20 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 # =====================================================================
-# KONFIGURASI — WAJIB SAMA PERSIS DENGAN TRAINING PIPELINE (debug_pipeline_v2.ipynb)
+# KONFIGURASI — WAJIB SAMA PERSIS DENGAN TRAINING PIPELINE (Config class)
 # =====================================================================
 ROI_SIZE = 128
-IMAGE_SIZE = 128  # Sesuai notebook training
+IMAGE_SIZE = 128 
 
-HOG_ORIENT = 12   # Sesuai notebook training
-HOG_PIXELS = 8
+HOG_ORIENT = 9    
+HOG_PIXELS = 16  
 HOG_CELLS = 2
+HOG_BLOCK_NORM = "L2-Hys"  
 
-SGF_ANGLES = np.deg2rad(np.arange(0, 360, 15))  # 24 sudut, step 15 derajat
+HOG_SGF_WEIGHT = 0.85  
+SGF_ANGLES = np.deg2rad(np.arange(0, 180, 15))  
 
-CLAHE_CLIP = 1.5   # Notebook: 1.5 (bukan 2.0)
+CLAHE_CLIP = 1.5
 CLAHE_TILE = (8, 8)
 
 # Gabor Filter Bank — dual-scale, 8 theta (step 22.5 derajat) = 16 kernel total
@@ -48,7 +54,7 @@ GABOR_GAMMA = 0.5
 GABOR_THETAS = np.deg2rad([0, 22.5, 45, 67.5, 90, 112.5, 135, 157.5])
 GABOR_SCALES = [
     {"sigma": 3.5, "lambda": 12.0},  # Principal lines
-    {"sigma": 1.2, "lambda": 4.0},   # Wrinkles & ridge features
+    {"sigma": 2.0, "lambda": 7.0},   # Wrinkles & ridge features (sebelumnya salah: 1.2/4.0)
 ]
 
 # Augmentasi registrasi — HARUS sama dengan augment_template_only() di notebook
@@ -75,19 +81,19 @@ except Exception as e:
 # =====================================================================
 def normalize_illumination(img_gray, sigma_small=1.0, sigma_large=5.0):
     img_f = img_gray.astype(np.float32)
-    
+
     # 1. Bikin dua versi blur
     g_small = cv2.GaussianBlur(img_f, (0, 0), sigmaX=sigma_small)
     g_large = cv2.GaussianBlur(img_f, (0, 0), sigmaX=sigma_large)
-    
+
     # 2. Kurangi untuk menghilangkan bayangan/iluminasi (DoG)
     dog = g_small - g_large
     dog = dog - dog.mean()
-    
-    # 3. Baris ke-2 Eksperimen: Percentile Clip (1, 99) untuk potong outlier piksel
+
+    # 3. Percentile Clip (1, 99) untuk potong outlier piksel
     lo, hi = np.percentile(dog, [1, 99])
     dog_clipped = np.clip(dog, lo, hi)
-    
+
     # 4. Normalisasi akhir ke range 0-255 agar kontras maksimal
     return cv2.normalize(dog_clipped, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
@@ -99,7 +105,7 @@ def enhance_gabor(img_gray: np.ndarray, use_dog: bool = True) -> np.ndarray:
     """
     Gabor filter bank dual-scale (2 sigma/lambda x 8 theta = 16 kernel),
     dikombinasikan 0.4*max + 0.6*mean, dilanjutkan CLAHE.
-    SINKRON dengan enhance_gabor() di notebook training.
+    SINKRON dengan enhance_gabor() di training (Config.GABOR_*).
     """
     if use_dog:
         img_gray = normalize_illumination(img_gray)
@@ -131,15 +137,15 @@ def enhance_gabor(img_gray: np.ndarray, use_dog: bool = True) -> np.ndarray:
 
 
 # =====================================================================
-# STEP 2B — SHARPEN & RESIZE (sebelumnya hilang dari extractor lama!)
+# STEP 2B — SHARPEN & RESIZE
 # =====================================================================
 def sharpen_and_resize(img_gray: np.ndarray) -> np.ndarray:
     """
     Unsharp masking lalu resize ke IMAGE_SIZE x IMAGE_SIZE dengan INTER_CUBIC.
-    SINKRON dengan sharpen_and_resize() di notebook training.
+    SINKRON dengan sharpen_and_resize() di training: addWeighted(1.5, gaussian, -0.5).
     """
     gaussian = cv2.GaussianBlur(img_gray, (5, 5), 2.0)
-    sharpened = cv2.addWeighted(img_gray, 1.8, gaussian, -0.8, 0)
+    sharpened = cv2.addWeighted(img_gray, 1.5, gaussian, -0.5, 0)  # sebelumnya salah: 1.8 / -0.8
     return cv2.resize(
         sharpened, (IMAGE_SIZE, IMAGE_SIZE), interpolation=cv2.INTER_CUBIC
     )
@@ -151,7 +157,10 @@ def sharpen_and_resize(img_gray: np.ndarray) -> np.ndarray:
 def extract_hog_sgf(img_gray: np.ndarray) -> np.ndarray:
     """
     Ekstraksi Fitur Kombinasi HOG + SGF.
-    Input WAJIB sudah melalui sharpen_and_resize() (160x160).
+    SINKRON dengan extract_hog_sgf() di training:
+      - HOG: orientations=9, pixels_per_cell=16x16, cells_per_block=2x2, block_norm='L2-Hys'
+      - SGF: 12 sudut (0-180 step 15), pakai |FR| sebelum mean/std
+      - Kombinasi: hog*0.85 + sgf*0.15, lalu L2-normalize ulang
     """
     img_target = cv2.resize(img_gray, (IMAGE_SIZE, IMAGE_SIZE))
 
@@ -160,7 +169,7 @@ def extract_hog_sgf(img_gray: np.ndarray) -> np.ndarray:
         orientations=HOG_ORIENT,
         pixels_per_cell=(HOG_PIXELS, HOG_PIXELS),
         cells_per_block=(HOG_CELLS, HOG_CELLS),
-        block_norm="L2",
+        block_norm=HOG_BLOCK_NORM,
         visualize=False,
     )
 
@@ -171,18 +180,22 @@ def extract_hog_sgf(img_gray: np.ndarray) -> np.ndarray:
     sgf_feats = []
     for theta in SGF_ANGLES:
         FR = np.cos(theta) * Ix + np.sin(theta) * Iy
-        sgf_feats.append(np.mean(FR))
-        sgf_feats.append(np.std(FR))
+        FR_abs = np.abs(FR)
+        sgf_feats.append(np.mean(FR_abs))
+        sgf_feats.append(np.std(FR_abs))
 
     sgf_feat = np.array(sgf_feats, dtype=np.float32)
 
-    hog_norm = hog_feat / (np.linalg.norm(hog_feat) + 1e-8)
-    sgf_norm = sgf_feat / (np.linalg.norm(sgf_feat) + 1e-8)
+    hog_norm = hog_feat / np.maximum(np.linalg.norm(hog_feat), 1e-8)
+    sgf_norm = sgf_feat / np.maximum(np.linalg.norm(sgf_feat), 1e-8)
 
-    combined = np.concatenate([hog_norm * 0.8, sgf_norm * 0.2])
-    norm = np.linalg.norm(combined)
-    if norm > 0:
-        combined = combined / norm
+    combined = np.concatenate([
+        hog_norm * HOG_SGF_WEIGHT,
+        sgf_norm * (1 - HOG_SGF_WEIGHT),
+    ])
+    total_norm = np.linalg.norm(combined)
+    if total_norm > 0:
+        combined = combined / total_norm
 
     return combined
 
@@ -194,7 +207,7 @@ def preprocess_and_extract(roi_gray: np.ndarray) -> np.ndarray:
     """
     Pipeline lengkap: ROI -> DoG -> Gabor+CLAHE -> Sharpen+Resize -> HOG+SGF.
     Dipakai untuk foto asli MAUPUN hasil augment_roi (urutan harus identik
-    dengan load_dataset_clean() / augment_template_only() di notebook).
+    dengan pipeline training).
     """
     dog = normalize_illumination(roi_gray)
     enhanced = enhance_gabor(dog, use_dog=False)  # DoG sudah dihitung manual di atas
@@ -422,23 +435,22 @@ def extract_from_roi_batch_register(roi_bytes_list: list) -> dict:
     for idx, roi_bytes in enumerate(roi_bytes_list, start=1):
         img_gray = _decode_and_prepare_roi(roi_bytes)
         _save_debug_input(img_gray, tag=f"register_foto{idx}")
-        
+
         is_ok, reason, details = check_image_quality(img_gray)
         if not is_ok:
             raise ValueError(f"Foto {idx}: {reason}")
 
         feat_original = preprocess_and_extract(img_gray)
         all_vectors.append(_vector_to_pca(feat_original))
-        print(f"[register] Foto {idx}: 1 vector asli ditambahkan")  # ← tambah ini
+        print(f"[register] Foto {idx}: 1 vector asli ditambahkan")
 
         for aug_idx, aug_roi in enumerate(augment_roi(img_gray, n_aug=N_AUG_PER_TEMPLATE), start=1):
             feat_aug = preprocess_and_extract(aug_roi)
             all_vectors.append(_vector_to_pca(feat_aug))
-            print(f"[register] Foto {idx}: augmentasi {aug_idx}/{N_AUG_PER_TEMPLATE} selesai")  # ← tambah ini
+            print(f"[register] Foto {idx}: augmentasi {aug_idx}/{N_AUG_PER_TEMPLATE} selesai")
 
-    print(f"[register] Total vectors: {len(all_vectors)}")  # ← tambah ini
+    print(f"[register] Total vectors: {len(all_vectors)}")
 
-       
     return {
         "status": "success",
         "mode": "register",
