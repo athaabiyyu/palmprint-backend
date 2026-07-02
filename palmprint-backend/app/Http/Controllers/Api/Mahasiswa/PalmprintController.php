@@ -16,18 +16,20 @@ class PalmprintController extends Controller
                'foto' => 'required|mimes:jpg,jpeg,png|max:10240',
           ]);
 
+          $mahasiswa = $request->user();
+
           $fileName = uniqid() . '.' . $request->file('foto')->getClientOriginalExtension();
           $fullPath = storage_path('app/temp/' . $fileName);
           $request->file('foto')->move(storage_path('app/temp'), $fileName);
 
-          $results = PythonHelper::extractFeatures([$fullPath]);
+          $result = PythonHelper::extractFeature($fullPath, $mahasiswa->nama ?? null);
 
           if (file_exists($fullPath)) unlink($fullPath);
 
-          if (!$results || $results[0]['status'] !== 'success') {
+          if (!$result || $result['status'] !== 'success') {
                return response()->json([
                     'valid'   => false,
-                    'message' => $results[0]['message'] ?? 'Foto tidak valid',
+                    'message' => $result['message'] ?? 'Foto tidak valid',
                ]);
           }
 

@@ -41,20 +41,13 @@ def health_check():
 # ENDPOINT UTAMA — EXTRACT VEKTOR PCA
 # =====================================================================
 @app.post("/extract")
-async def extract_features(roi: List[UploadFile] = File(...)):
-    """
-    Mode otomatis berdasarkan jumlah file yang dikirim:
-      - 1 file  -> mode absensi/verifikasi -> 1 vector
-      - 3 file  -> mode registrasi -> tiap foto di-expand jadi 7 vector
-                   (1 asli + 6 augmented) -> total 21 vector
-
-    Laravel cukup attach field 'roi' berkali-kali dalam 1 multipart request
-    (1x untuk absensi, 3x untuk registrasi/re-registrasi).
-    """
+async def extract_features(
+    roi: List[UploadFile] = File(...),
+    user_name: str = Form(None),   # <-- tambahan
+):
     if not roi:
         raise HTTPException(status_code=422, detail="Tidak ada file yang dikirim.")
 
-    # Validasi MIME type semua file
     for f in roi:
         if f.content_type not in ALLOWED_CONTENT_TYPES:
             raise HTTPException(
@@ -62,7 +55,6 @@ async def extract_features(roi: List[UploadFile] = File(...)):
                 detail=f"Tipe file '{f.content_type}' ditolak. Gunakan format JPG atau PNG."
             )
 
-    # Baca semua bytes
     roi_bytes_list = []
     for f in roi:
         content = await f.read()
@@ -72,13 +64,11 @@ async def extract_features(roi: List[UploadFile] = File(...)):
 
     try:
         if len(roi_bytes_list) == 1:
-            # MODE ABSENSI: 1 foto -> 1 vector
-            result = extract_from_roi(roi_bytes_list[0])
+            result = extract_from_roi(roi_bytes_list[0], user_name=user_name)
             return JSONResponse(content=result)
 
         elif len(roi_bytes_list) == REGISTER_FILE_COUNT:
-            # MODE REGISTRASI: 3 foto -> 21 vector
-            result = extract_from_roi_batch_register(roi_bytes_list)
+            result = extract_from_roi_batch_register(roi_bytes_list, user_name=user_name)
             return JSONResponse(content=result)
 
         else:
@@ -119,7 +109,8 @@ async def extract_features(roi: List[UploadFile] = File(...)):
 @app.post("/identify")
 async def identify_user(
     roi: UploadFile = File(...),
-    gallery: UploadFile = File(...),  # ← gallery sebagai file JSON
+    gallery: UploadFile = File(...),
+    session_tag: str = Form(None),
 ):
     print(">>> IDENTIFY CALLED <<<")
 
@@ -145,7 +136,7 @@ async def identify_user(
         raise HTTPException(status_code=422, detail="Gallery kosong.")
 
     try:
-        result = identify_from_roi(roi_bytes, gallery_parsed)
+        result = identify_from_roi(roi_bytes, gallery_parsed, user_name=session_tag)
         return JSONResponse(content=result)
     except ValueError as e:
         return JSONResponse(status_code=200, content={"status": "error", "message": str(e)})

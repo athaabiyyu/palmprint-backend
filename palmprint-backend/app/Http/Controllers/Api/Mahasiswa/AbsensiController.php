@@ -63,7 +63,7 @@ class AbsensiController extends Controller
         $request->file('foto')->move(storage_path('app/temp'), $fileName);
 
         // EKSTRAKSI FITUR (mode absensi: 1 foto -> 1 vector)
-        $result = PythonHelper::extractFeature($fullPath);
+        $result = PythonHelper::extractFeature($fullPath, $mahasiswa->nama);
         if (file_exists($fullPath)) unlink($fullPath);
 
         // SATU blok cek error dengan quality gate support
@@ -113,23 +113,7 @@ class AbsensiController extends Controller
         Log::info('Jumlah template terdaftar: ' . $templates->count());
         Log::info('==================================================');
 
-        // MATCHING
-        if ($bestScore >= $threshold) {
-            Absensi::create([
-                'sesi_absensi_id'  => $sesi->id,
-                'mahasiswa_id'     => $mahasiswa->id,
-                'waktu_absen'      => Carbon::now(),
-                'similarity_score' => $bestScore,
-                'status'           => 'hadir',
-            ]);
 
-            return response()->json([
-                'message'    => 'Absensi berhasil!',
-                'similarity' => round($bestScore, 4),
-                'threshold'  => round($threshold, 4),
-                'status'     => 'hadir',
-            ]);
-        }
 
         return response()->json([
             'message'    => 'Telapak tangan tidak dikenali. Pastikan pencahayaan cukup dan telapak tangan terlihat jelas.',

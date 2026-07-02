@@ -321,23 +321,34 @@
                     <div class="mb-3">
                         <label class="form-label fw-semibold">Durasi Absensi</label>
                         <div class="d-flex gap-2 flex-wrap">
-                            @foreach ([10, 15, 20, 30, 60] as $dur)
+                            @php
+                                $durasiOptions = [10, 15, 20, 30, 60, 180];
+                                $durasiLabel = function ($menit) {
+                                    if ($menit >= 60) {
+                                        $jam = intdiv($menit, 60);
+                                        $sisaMenit = $menit % 60;
+                                        return $sisaMenit > 0 ? "{$jam} jam {$sisaMenit} mnt" : "{$jam} jam";
+                                    }
+                                    return "{$menit} mnt";
+                                };
+                            @endphp
+                            @foreach ($durasiOptions as $dur)
                                 <label style="cursor:pointer">
                                     <input type="radio" name="durasi" value="{{ $dur }}"
                                         {{ $dur === 15 ? 'checked' : '' }} style="display:none"
                                         onchange="selectDurasi(this)">
                                     <div class="durasi-btn" data-val="{{ $dur }}"
                                         style="
-                                        padding:8px 16px;
-                                        border-radius:10px;
-                                        border:1.5px solid #e2e8f0;
-                                        font-size:0.82rem;
-                                        font-weight:500;
-                                        color:#64748b;
-                                        background:#f8fafc;
-                                        {{ $dur === 15 ? 'border-color:#1d4ed8; background:#eff6ff; color:#1d4ed8;' : '' }}
-                                    ">
-                                        {{ $dur }} mnt
+                padding:8px 16px;
+                border-radius:10px;
+                border:1.5px solid #e2e8f0;
+                font-size:0.82rem;
+                font-weight:500;
+                color:#64748b;
+                background:#f8fafc;
+                {{ $dur === 15 ? 'border-color:#1d4ed8; background:#eff6ff; color:#1d4ed8;' : '' }}
+            ">
+                                        {{ $durasiLabel($dur) }}
                                     </div>
                                 </label>
                             @endforeach
@@ -807,10 +818,10 @@
                                 ${j.jam_mulai.substring(0,5)} — ${j.jam_selesai.substring(0,5)}
                             </div>
                             ${j.ruangan ? `
-                                <div style="font-size:0.8rem; color:#64748b; display:flex; align-items:center; gap:6px">
-                                    <i class="bi bi-geo-alt" style="color:#94a3b8"></i>
-                                    ${j.ruangan}
-                                </div>` : ''}
+                                    <div style="font-size:0.8rem; color:#64748b; display:flex; align-items:center; gap:6px">
+                                        <i class="bi bi-geo-alt" style="color:#94a3b8"></i>
+                                        ${j.ruangan}
+                                    </div>` : ''}
                             <div style="font-size:0.8rem; color:#64748b; display:flex; align-items:center; gap:6px">
                                 <i class="bi bi-person" style="color:#94a3b8"></i>
                                 ${j.dosen?.nama ?? '-'}

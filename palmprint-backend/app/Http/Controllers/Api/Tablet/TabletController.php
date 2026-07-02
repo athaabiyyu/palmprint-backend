@@ -8,7 +8,6 @@ use App\Models\Absensi;
 use App\Models\PalmprintTemplate;
 use App\Helpers\PythonHelper;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
 
 class TabletController extends Controller
@@ -22,14 +21,14 @@ class TabletController extends Controller
             'jadwal.dosen',
             'jadwal.kelas',
         ])
-        ->where('is_active', true)
-        ->get()
-        ->filter(function ($sesi) use ($now) {
-            $batas = Carbon::parse($sesi->dibuka_at)
-                ->addMinutes($sesi->durasi_menit);
-            return $now->lessThan($batas);
-        })
-        ->values();
+            ->where('is_active', true)
+            ->get()
+            ->filter(function ($sesi) use ($now) {
+                $batas = Carbon::parse($sesi->dibuka_at)
+                    ->addMinutes($sesi->durasi_menit);
+                return $now->lessThan($batas);
+            })
+            ->values();
 
         return response()->json(['data' => $sesis]);
     }
@@ -53,8 +52,9 @@ class TabletController extends Controller
         }
 
         $modelVersion = config('palmprint.model_version');
+        
+        
         $mahasiswaIds = $sesi->jadwal->kelas->mahasiswas()->pluck('mahasiswas.id');
-
         $gallery = [];
         foreach ($mahasiswaIds as $mahasiswaId) {
             $vectors = PalmprintTemplate::where('mahasiswa_id', $mahasiswaId)
@@ -82,15 +82,18 @@ class TabletController extends Controller
         $result = PythonHelper::identifyUser($fullPath, $gallery);
         if (file_exists($fullPath)) unlink($fullPath);
 
+
         if ($result['status'] === 'error') {
             return response()->json(['message' => $result['message'] ?? 'Gagal memproses foto'], 422);
         }
 
         if ($result['status'] === 'unknown') {
             return response()->json([
-                'message'   => 'Telapak tangan tidak dikenali.',
-                'score'     => round($result['score'], 4),
-                'threshold' => round($result['threshold'], 4),
+                'message'          => 'Telapak tangan tidak dikenali.',
+                'score'            => round($result['score'], 4),
+                'margin'           => round($result['margin'], 4),
+                'threshold_sim'    => round($result['threshold_sim'], 4),
+                'threshold_margin' => round($result['threshold_margin'], 4),
             ], 401);
         }
 
@@ -122,14 +125,14 @@ class TabletController extends Controller
             'status'           => 'hadir',
         ]);
 
-        Log::info('[1:N] ' . $mahasiswa->nama . ' | score=' . $result['score']);
-
         return response()->json([
-            'message'    => 'Absensi berhasil!',
-            'mahasiswa'  => ['id' => $mahasiswa->id, 'nama' => $mahasiswa->nama, 'nim' => $mahasiswa->nim],
-            'similarity' => round($result['score'], 4),
-            'threshold'  => round($result['threshold'], 4),
-            'status'     => 'hadir',
+            'message'          => 'Absensi berhasil!',
+            'mahasiswa'        => ['id' => $mahasiswa->id, 'nama' => $mahasiswa->nama, 'nim' => $mahasiswa->nim],
+            'similarity'       => round($result['score'], 4),
+            'margin'           => round($result['margin'], 4),
+            'threshold_sim'    => round($result['threshold_sim'], 4),
+            'threshold_margin' => round($result['threshold_margin'], 4),
+            'status'           => 'hadir',
         ]);
     }
 }

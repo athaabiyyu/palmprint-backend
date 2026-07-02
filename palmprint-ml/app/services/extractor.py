@@ -11,6 +11,13 @@ SINKRON 100% dengan training pipeline (Config class):
   - CLAHE clip=1.5, tile=8x8
   - Tanpa StandardScaler
   - augment_roi (13 jenis gangguan, n_aug=6) untuk skema registrasi 21 vector/user
+
+REVISI: Threshold identifikasi 1:N sekarang pakai DUA parameter (hasil Cell 7I):
+  - threshold_sim.pkl    : batas minimum cosine similarity skor kandidat #1
+  - threshold_margin.pkl : batas minimum selisih skor kandidat #1 - kandidat #2
+  Mode verifikasi 1:1 (extract_from_roi / extract_from_roi_batch_register) TETAP
+  memakai nama field 'threshold' di return dict (bukan 'threshold_sim') supaya
+  AbsensiController.php (flow 1:1) tidak perlu diubah sama sekali.
 """
 
 import os
@@ -61,18 +68,20 @@ GABOR_SCALES = [
 N_AUG_PER_TEMPLATE = 6  # 1 foto asli -> 6 augmented -> 3 foto x 7 = 21 vector/user
 
 # =====================================================================
-# LOAD ARTEFAK MODEL (PCA & THRESHOLD SAJA)
+# LOAD ARTEFAK MODEL (PCA & THRESHOLD SIMILARITY + MARGIN)
 # =====================================================================
 print(f"[extractor] Loading models dari: {MODELS_DIR}")
 
 try:
     # _scaler dihapus total karena merusak orientasi spasial L2-Norm
     _pca = joblib.load(os.path.join(MODELS_DIR, "pca.pkl"))
-    _threshold = joblib.load(os.path.join(MODELS_DIR, "threshold.pkl"))
+    _threshold_sim = joblib.load(os.path.join(MODELS_DIR, "threshold_sim.pkl"))
+    _threshold_margin = joblib.load(os.path.join(MODELS_DIR, "threshold_margin.pkl"))
     print(f"[extractor] OK pca.pkl loaded (n_components={_pca.n_components_})")
-    print(f"[extractor] OK threshold.pkl loaded (value={_threshold:.4f})")
+    print(f"[extractor] OK threshold_sim.pkl loaded (value={_threshold_sim:.4f})")
+    print(f"[extractor] OK threshold_margin.pkl loaded (value={_threshold_margin:.4f})")
 except Exception as e:
-    _pca = _threshold = None
+    _pca = _threshold_sim = _threshold_margin = None
     print(f"[extractor] GAGAL load model: {e}")
 
 
@@ -361,10 +370,20 @@ def _decode_and_prepare_roi(roi_bytes: bytes) -> np.ndarray:
     return img_gray
 
 
-def _save_debug_input(img_gray: np.ndarray, tag: str = "roi") -> None:
+def _sanitize_name(name: str) -> str:
+    if not name:
+        return "unknown"
+    safe = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in str(name))
+    return safe.strip("_") or "unknown"
+
+
+def _save_debug_input(img_gray: np.ndarray, tag: str = "roi", user_name: str = None) -> None:
     debug_dir = os.path.join(BASE_DIR, "debug_inputs")
     os.makedirs(debug_dir, exist_ok=True)
-    fname = f"debug_{tag}_{datetime.datetime.now().strftime('%H%M%S_%f')}.jpg"
+    if user_name:
+        fname = f"debug_{tag}_{_sanitize_name(user_name)}.jpg"
+    else:
+        fname = f"debug_{tag}.jpg"
     cv2.imwrite(os.path.join(debug_dir, fname), img_gray)
 
 
@@ -375,17 +394,16 @@ def _vector_to_pca(feat: np.ndarray) -> list:
 
 
 # =====================================================================
-# MAIN INFERENCE — MODE ABSENSI (1 foto -> 1 vector)
+# MAIN INFERENCE — MODE ABSENSI (1 foto -> 1 vector, verifikasi 1:1)
+# Dipakai oleh AbsensiController.php. Field 'threshold' SENGAJA tidak
+# diganti nama jadi 'threshold_sim' supaya PHP tidak perlu diubah.
 # =====================================================================
-def extract_from_roi(roi_bytes: bytes) -> dict:
-    """
-    Dipakai untuk absensi: 1 foto, tanpa augmentasi, quality-gated.
-    """
-    if _pca is None or _threshold is None:
+def extract_from_roi(roi_bytes: bytes, user_name: str = None) -> dict:
+    if _pca is None or _threshold_sim is None:
         raise ValueError("Model (PCA/Threshold) belum siap di server. Cek folder models/.")
 
     img_gray = _decode_and_prepare_roi(roi_bytes)
-    _save_debug_input(img_gray, tag="absen")
+    _save_debug_input(img_gray, tag="absen", user_name=user_name)
 
     is_ok, reason, details = check_image_quality(img_gray)
     if not is_ok:
@@ -398,36 +416,21 @@ def extract_from_roi(roi_bytes: bytes) -> dict:
         "status": "success",
         "mode": "verify",
         "vector": vector,
-        "threshold": float(_threshold),
+        "threshold": float(_threshold_sim),
         "dim": len(vector),
     }
 
 # =====================================================================
-# MAIN INFERENCE — MODE IDENTIFIKASI 1:N (tambahan untuk 1:N)
+# MAIN INFERENCE — MODE IDENTIFIKASI 1:N
+# Dipakai oleh TabletController.php. Terima HANYA jika lolos DUA syarat:
+# similarity >= threshold_sim DAN margin >= threshold_margin (hasil Cell 7I).
 # =====================================================================
-def identify_from_roi(roi_bytes: bytes, gallery: list) -> dict:
-    """
-    Identifikasi 1:N: bandingkan 1 query foto ke SEMUA gallery di database.
-    
-    Args:
-        roi_bytes : bytes foto dari Flutter
-        gallery   : list of dict dari Laravel, format:
-                    [{"user_id": 1, "vectors": [[...], [...], ...]}, ...]
-    
-    Return:
-        {
-          "status": "success" | "unknown",
-          "user_id": int | None,
-          "score": float,
-          "threshold": float
-        }
-    """
-    if _pca is None or _threshold is None:
+def identify_from_roi(roi_bytes: bytes, gallery: list, user_name: str = None) -> dict:
+    if _pca is None or _threshold_sim is None or _threshold_margin is None:
         raise ValueError("Model (PCA/Threshold) belum siap di server. Cek folder models/.")
 
-    # Ekstrak fitur query
     img_gray = _decode_and_prepare_roi(roi_bytes)
-    _save_debug_input(img_gray, tag="identify")
+    _save_debug_input(img_gray, tag="identify", user_name=user_name)
 
     is_ok, reason, details = check_image_quality(img_gray)
     if not is_ok:
@@ -436,73 +439,56 @@ def identify_from_roi(roi_bytes: bytes, gallery: list) -> dict:
     feat = preprocess_and_extract(img_gray)
     query_vector = np.array(_vector_to_pca(feat))
 
-    # Bandingkan ke semua gallery
-    best_user_id = None
-    best_score   = -1.0
-
+    sims_per_user = []
     for entry in gallery:
-        user_id     = entry["user_id"]
-        vectors     = np.array(entry["vectors"])  # shape: (21, n_components)
+        user_id = entry["user_id"]
+        vectors = np.array(entry["vectors"])
+        norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+        vectors_n = vectors / np.maximum(norms, 1e-8)
+        query_n = query_vector / np.maximum(np.linalg.norm(query_vector), 1e-8)
+        sims = vectors_n @ query_n
+        score = float(np.max(sims))   # agregasi 'max', SINKRON dgn skenario terpilih (Augmented 21x · max)
+        sims_per_user.append((user_id, score))
 
-        # Cosine similarity query vs semua vector user ini, ambil max
-        norms       = np.linalg.norm(vectors, axis=1, keepdims=True)
-        vectors_n   = vectors / np.maximum(norms, 1e-8)
-        query_n     = query_vector / np.maximum(np.linalg.norm(query_vector), 1e-8)
-        sims        = vectors_n @ query_n  # dot product = cosine similarity
-        score       = float(np.max(sims))
+    sims_per_user.sort(key=lambda x: x[1], reverse=True)
+    best_user_id, best_score = sims_per_user[0]
+    second_score = sims_per_user[1][1] if len(sims_per_user) > 1 else 0.0
+    margin = round(best_score - second_score, 6)
 
-        if score > best_score:
-            best_score   = score
-            best_user_id = user_id
+    # Terima HANYA jika lolos DUA syarat: similarity DAN margin
+    # (SINKRON 100% dengan aturan seleksi threshold di Cell 7I notebook training)
+    passes_sim = best_score >= _threshold_sim
+    passes_margin = margin >= _threshold_margin
 
-    # Cek threshold
-    if best_score >= _threshold:
-        return {
-            "status"    : "success",
-            "user_id"   : best_user_id,
-            "score"     : round(best_score, 6),
-            "threshold" : float(_threshold),
-        }
+    if passes_sim and passes_margin:
+        status = "success"
     else:
-        return {
-            "status"    : "unknown",
-            "user_id"   : None,
-            "score"     : round(best_score, 6),
-            "threshold" : float(_threshold),
-        }
+        status = "unknown"
+        best_user_id = None
+
+    return {
+        "status": status,
+        "user_id": best_user_id,
+        "score": round(best_score, 6),
+        "margin": margin,
+        "threshold_sim": float(_threshold_sim),
+        "threshold_margin": float(_threshold_margin),
+        "passes_sim": passes_sim,
+        "passes_margin": passes_margin,
+    }
 
 # =====================================================================
 # MAIN INFERENCE — MODE REGISTRASI (3 foto -> 21 vector)
 # =====================================================================
-def extract_from_roi_batch_register(roi_bytes_list: list) -> dict:
-    """
-    Dipakai untuk registrasi/re-registrasi: terima N foto asli (biasanya 3),
-    tiap foto di-expand jadi 1 asli + N_AUG_PER_TEMPLATE augmented.
-    Quality gate HANYA dijalankan pada foto asli (augmented sengaja
-    "dirusak" untuk simulasi kondisi HP, jadi tidak melalui gate).
-
-    Return:
-        {
-          "status": "success",
-          "mode": "register",
-          "vectors": [...],          # urut: [foto1: 1 asli + 6 aug, foto2: ..., foto3: ...]
-          "per_photo_count": 7,
-          "total_vectors": 21,
-          "threshold": 0.16,
-          "dim": 588
-        }
-    Kalau ada foto yang gagal quality gate, langsung raise ValueError
-    dengan info foto ke berapa yang gagal (caller/Laravel sudah pakai
-    pola ini: tolak semua kalau salah satu foto gagal).
-    """
-    if _pca is None or _threshold is None:
+def extract_from_roi_batch_register(roi_bytes_list: list, user_name: str = None) -> dict:
+    if _pca is None or _threshold_sim is None:
         raise ValueError("Model (PCA/Threshold) belum siap di server. Cek folder models/.")
 
     all_vectors = []
 
     for idx, roi_bytes in enumerate(roi_bytes_list, start=1):
         img_gray = _decode_and_prepare_roi(roi_bytes)
-        _save_debug_input(img_gray, tag=f"register_foto{idx}")
+        _save_debug_input(img_gray, tag=f"register_foto{idx}", user_name=user_name)
 
         is_ok, reason, details = check_image_quality(img_gray)
         if not is_ok:
@@ -510,14 +496,10 @@ def extract_from_roi_batch_register(roi_bytes_list: list) -> dict:
 
         feat_original = preprocess_and_extract(img_gray)
         all_vectors.append(_vector_to_pca(feat_original))
-        print(f"[register] Foto {idx}: 1 vector asli ditambahkan")
 
         for aug_idx, aug_roi in enumerate(augment_roi(img_gray, n_aug=N_AUG_PER_TEMPLATE), start=1):
             feat_aug = preprocess_and_extract(aug_roi)
             all_vectors.append(_vector_to_pca(feat_aug))
-            print(f"[register] Foto {idx}: augmentasi {aug_idx}/{N_AUG_PER_TEMPLATE} selesai")
-
-    print(f"[register] Total vectors: {len(all_vectors)}")
 
     return {
         "status": "success",
@@ -525,6 +507,6 @@ def extract_from_roi_batch_register(roi_bytes_list: list) -> dict:
         "vectors": all_vectors,
         "per_photo_count": 1 + N_AUG_PER_TEMPLATE,
         "total_vectors": len(all_vectors),
-        "threshold": float(_threshold),
+        "threshold": float(_threshold_sim),
         "dim": len(all_vectors[0]) if all_vectors else 0,
     }
